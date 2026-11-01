@@ -22,7 +22,7 @@ interface Driver {
 
 export const usingPostgres = () => !!(process.env.DATABASE_HOST && process.env.DATABASE_PASSWORD);
 
-const TABLES = ["conversations", "messages", "drafts", "events", "kv", "accounts", "users"];
+const TABLES = ["conversations", "messages", "drafts", "events", "kv", "accounts", "users", "timers", "estimates", "task_links", "status_log"];
 
 const schema = (pg: boolean) => {
   const big = pg ? "bigint" : "integer";
@@ -40,6 +40,7 @@ create table if not exists conversations (
   suggestion text,
   suggestion_for text,
   reminded_at ${big},
+  remind_after integer,
   demo integer not null default 0,
   created_at ${big} not null,
   unique (channel, external_id, account)
@@ -80,9 +81,50 @@ create table if not exists users (
   role text not null default 'team',
   password_hash text not null,
   active integer not null default 1,
+  clickup_name text,
   last_login ${big},
   created_at ${big} not null
 );
+create table if not exists timers (
+  id text primary key,
+  task_id text not null,
+  task_title text not null,
+  project text,
+  person text not null,
+  started_at ${big} not null,
+  ended_at ${big},
+  started_by text,
+  pushed integer not null default 0
+);
+create index if not exists timers_person on timers (person, started_at);
+create index if not exists timers_task on timers (task_id);
+create table if not exists estimates (
+  task_id text primary key,
+  my_min integer,
+  ai_min integer,
+  ai_note text,
+  updated_at ${big} not null
+);
+create table if not exists task_links (
+  task_id text primary key,
+  conv_id text not null,
+  message_ids text,
+  title text not null,
+  url text,
+  project text,
+  created_at ${big} not null
+);
+create table if not exists status_log (
+  id text primary key,
+  task_id text not null,
+  task_title text,
+  person text,
+  from_status text,
+  to_status text not null,
+  source text not null,
+  at ${big} not null
+);
+create index if not exists status_log_task on status_log (task_id, at);
 create table if not exists events (
   id ${pg ? "bigint generated always as identity primary key" : "integer primary key autoincrement"},
   source text not null,
@@ -164,9 +206,16 @@ const SQLITE_MIGRATIONS: [table: string, column: string, type: string][] = [
   ["messages", "via", "text"],
   ["drafts", "author_id", "text"],
   ["drafts", "sent_to", "text"],
+  ["users", "clickup_name", "text"],
+  ["conversations", "remind_after", "integer"],
 ];
 // Same for Postgres databases created before them
-const PG_MIGRATIONS = ["alter table drafts add column if not exists author_id text", "alter table drafts add column if not exists sent_to text"];
+const PG_MIGRATIONS = [
+  "alter table drafts add column if not exists author_id text",
+  "alter table drafts add column if not exists sent_to text",
+  "alter table users add column if not exists clickup_name text",
+  "alter table conversations add column if not exists remind_after integer",
+];
 
 const g = globalThis as unknown as { __gacDriver?: Promise<Driver>; __gacSeeded?: boolean };
 

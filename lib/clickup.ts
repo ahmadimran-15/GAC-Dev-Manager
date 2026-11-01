@@ -166,7 +166,7 @@ const PRIORITY: Record<string, number> = { urgent: 1, high: 2, normal: 3, low: 4
 
 // New tasks go into the project's list inside Current Projects. A new project name creates a new list there.
 export async function createTask(t: { title: string; description: string; project: string; assignee?: string; priority?: string; due?: string }) {
-  if (!token()) return { ok: true, simulated: true, url: null as string | null, createdProject: false };
+  if (!token()) return { ok: true, simulated: true, url: null as string | null, id: null as string | null, createdProject: false };
   const s = await structure();
   let list = s.projects.find((p) => p.current && p.name.toLowerCase() === t.project.trim().toLowerCase());
   let createdProject = false;
@@ -190,7 +190,68 @@ export async function createTask(t: { title: string; description: string; projec
   });
   boardCache = null;
   searchCache = null;
-  return { ok: true, simulated: false, url: task.url as string, createdProject };
+  return { ok: true, simulated: false, url: task.url as string, id: String(task.id), createdProject };
+}
+
+export function invalidateBoard() {
+  boardCache = null;
+  searchCache = null;
+}
+
+// ---------- Two-way status sync ----------
+
+// The statuses a task can move to (they come from its list), plus its current one.
+export async function taskStatuses(taskId: string) {
+  const t = await cu(`/task/${taskId}`);
+  const list = await cu(`/list/${t.list.id}`);
+  return {
+    current: String(t.status?.status ?? "").toLowerCase(),
+    title: t.name as string,
+    assignee: (t.assignees?.[0]?.username as string) ?? "Unassigned",
+    options: (list.statuses ?? []).map((s: Any) => ({ status: String(s.status).toLowerCase(), color: s.color as string, type: s.type as string })) as { status: string; color: string; type: string }[],
+  };
+}
+
+export async function setTaskStatus(taskId: string, status: string) {
+  await cu(`/task/${taskId}`, { method: "PUT", body: JSON.stringify({ status }) });
+  invalidateBoard();
+}
+
+// When a timer starts on a task that hasn't been started yet, move it to the list's "in progress" status.
+export async function markInProgress(taskId: string) {
+  const s = await taskStatuses(taskId);
+  const cur = s.options.find((o) => o.status === s.current);
+  if (cur && cur.type !== "open") return null;
+  const target = s.options.find((o) => /progress|doing|working/.test(o.status));
+  if (!target) return null;
+  await setTaskStatus(taskId, target.status);
+  return { from: s.current, to: target.status, title: s.title, assignee: s.assignee };
+}
+
+let meCache: { id: number; username: string } | null = null;
+export async function clickupMe() {
+  meCache ??= (await cu<{ user: Any }>("/user")).user;
+  return meCache!;
+}
+
+// ClickUp's API can only log time for the token's owner on the Free plan; others stay in our own log.
+export async function pushTimeEntry(taskId: string, startMs: number, durationMs: number) {
+  const team = await teamId();
+  await cu(`/team/${team}/time_entries`, { method: "POST", body: JSON.stringify({ tid: taskId, start: startMs, duration: durationMs, description: "GAC Desk timer" }) });
+}
+
+// Registers (or re-points) our webhook so status changes made in ClickUp reach the dashboard instantly.
+export async function registerClickupWebhook(endpoint: string) {
+  const team = await teamId();
+  const events = ["taskStatusUpdated", "taskCreated", "taskUpdated", "taskDeleted", "taskAssigneeUpdated", "taskCommentPosted", "taskTimeTrackedUpdated"];
+  const { webhooks } = await cu<{ webhooks: Any[] }>(`/team/${team}/webhook`);
+  const mine = webhooks.find((w) => String(w.endpoint).includes("/api/webhooks/clickup"));
+  if (mine) {
+    const r = await cu(`/webhook/${mine.id}`, { method: "PUT", body: JSON.stringify({ endpoint, events, status: "active" }) });
+    return { id: String(mine.id), secret: String(r?.webhook?.secret ?? mine.secret ?? "") };
+  }
+  const r = await cu(`/team/${team}/webhook`, { method: "POST", body: JSON.stringify({ endpoint, events }) });
+  return { id: String(r.id), secret: String(r.webhook?.secret ?? "") };
 }
 
 // Where a project sits right now (e.g. "Pending From Client"), for warnings and the assistant.
