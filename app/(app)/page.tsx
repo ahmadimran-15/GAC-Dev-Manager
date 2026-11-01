@@ -8,6 +8,13 @@ import { Avatar, Channel, Section, ago, duration, mins } from "@/components/ui";
 import WaitingCard from "@/components/WaitingCard";
 import DraftCard from "@/components/DraftCard";
 import { OverviewSkeleton } from "@/components/Skeleton";
+import { clock, useTick, type RunningTimer } from "@/components/TaskControls";
+
+type TeamBoard = Board & {
+  now: number;
+  running: RunningTimer[];
+  changes: { task_id: string; task_title: string | null; person: string | null; from_status: string | null; to_status: string; source: string; at: number }[];
+};
 
 function Stat({ label, value, hint, alert }: { label: string; value: React.ReactNode; hint?: string; alert?: boolean }) {
   return (
@@ -21,12 +28,16 @@ function Stat({ label, value, hint, alert }: { label: string; value: React.React
 
 export default function Overview() {
   const { state } = useLive();
-  const [board, setBoard] = useState<Board | null>(null);
+  const [board, setBoard] = useState<TeamBoard | null>(null);
   const [date, setDate] = useState("");
+  const tick = useTick(board?.now);
 
   useEffect(() => {
-    api<Board>("/api/team").then(setBoard).catch(() => {});
+    const load = () => api<TeamBoard>("/api/team").then(setBoard).catch(() => {});
+    load();
     setDate(new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }));
+    const id = setInterval(load, 30_000);
+    return () => clearInterval(id);
   }, []);
 
   if (!state) return <OverviewSkeleton />;
@@ -88,15 +99,19 @@ export default function Overview() {
               {(board?.team ?? []).map((name) => {
                 const mine = active.filter((t) => t.assignee === name);
                 const isBlocked = blocked.some((t) => t.assignee === name);
+                const timer = board?.running.find((r) => r.person === name);
                 return (
                   <div key={name} className="flex items-start gap-3">
                     <Avatar name={name} size={28} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-[13.5px] font-medium">
                         {name}
-                        <span className="dot" style={{ background: mine.length ? "var(--green)" : isBlocked ? "var(--red)" : "#cfcfca" }} />
+                        <span className="dot" style={{ background: timer || mine.length ? "var(--green)" : isBlocked ? "var(--red)" : "#cfcfca" }} />
+                        {timer && <span className="tnum ml-auto text-[12px] font-normal text-[var(--green)]">{clock(timer.started_at, tick)}</span>}
                       </div>
-                      <div className="truncate text-[12.5px] text-[var(--muted)]">{mine[0] ? `${mine[0].title} · ${mine[0].project}` : isBlocked ? "Blocked" : "Nothing in progress"}</div>
+                      <div className="truncate text-[12.5px] text-[var(--muted)]">
+                        {timer ? `${timer.task_title} · ${timer.project ?? ""}` : mine[0] ? `${mine[0].title} · ${mine[0].project}` : isBlocked ? "Blocked" : "Nothing in progress"}
+                      </div>
                     </div>
                   </div>
                 );
@@ -113,6 +128,21 @@ export default function Overview() {
                 ))}
             </div>
           </Section>
+
+          {!!board?.changes?.length && (
+            <Section title="Status changes" right={<Link href="/team" className="text-[13px] text-[var(--ink-2)] hover:text-[var(--ink)]">All →</Link>}>
+              <div className="space-y-2">
+                {board.changes.slice(0, 5).map((c, i) => (
+                  <div key={i} className="text-[12.5px] leading-snug">
+                    <div className="truncate font-medium">{c.task_title ?? board.tasks.find((t) => t.id === c.task_id)?.title ?? c.task_id}</div>
+                    <div className="text-[var(--muted)]">
+                      {c.from_status ?? "?"} → <span className="text-[var(--ink-2)]">{c.to_status}</span> · {c.person ?? "someone"} · {ago(c.at, now)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
 
           <Section title="Recently answered">
             <div className="space-y-1">

@@ -8,10 +8,28 @@ export interface BoardLite {
   team: string[];
   projects: string[];
   source: string;
+  tasks?: { id: string; status: string }[];
 }
 
 // Turn selected client messages into a ClickUp task, with spoken or typed instructions.
-export default function TaskDrawer({ messages, project: initialProject, board, onClose }: { messages: string[]; project: string | null; board: BoardLite | null; onClose: () => void }) {
+// With convId the task is linked to the conversation and the picked messages.
+export default function TaskDrawer({
+  messages,
+  project: initialProject,
+  board,
+  onClose,
+  convId,
+  messageIds,
+  onCreated,
+}: {
+  messages: string[];
+  project: string | null;
+  board: BoardLite | null;
+  onClose: () => void;
+  convId?: string;
+  messageIds?: string[];
+  onCreated?: () => void;
+}) {
   const { toast, state } = useLive();
   const [instructions, setInstructions] = useState("");
   const [lang, setLang] = useState("en-US");
@@ -41,8 +59,9 @@ export default function TaskDrawer({ messages, project: initialProject, board, o
   async function create() {
     setBusy(true);
     try {
-      const r = await api<{ simulated: boolean }>("/api/tasks", { title, description, project, assignee, priority, due });
+      const r = await api<{ simulated: boolean }>("/api/tasks", { title, description, project, assignee, priority, due, conv_id: convId, message_ids: messageIds });
       toast(r.simulated ? "Task ready (test mode: add CLICKUP_TOKEN to create it in ClickUp)" : "Task created in ClickUp");
+      onCreated?.();
       onClose();
     } catch (e) {
       toast(e instanceof Error ? e.message : "ClickUp failed", "error");

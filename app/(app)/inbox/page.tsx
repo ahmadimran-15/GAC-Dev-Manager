@@ -5,7 +5,7 @@ import { CheckCheck, ListPlus, Mic, PenSquare, RotateCw, Search, Send, Sparkles,
 import Composer from "@/components/Composer";
 import type { ConvSummary, Message } from "@/lib/store";
 import { api, useLive, type DraftRow } from "@/components/Live";
-import { Avatar, CHANNELS, Channel, Pill, Waiting, ago } from "@/components/ui";
+import { Avatar, CHANNELS, Channel, Pill, STATUS_TONE, Waiting, ago } from "@/components/ui";
 import DraftCard from "@/components/DraftCard";
 import TaskDrawer, { type BoardLite } from "@/components/TaskDrawer";
 import { ackText } from "@/components/WaitingCard";
@@ -17,7 +17,10 @@ interface Detail {
   conversation: ConvSummary & { subject: string | null };
   messages: Message[];
   drafts: DraftRow[];
+  links: { task_id: string; title: string; url: string | null; project: string | null; message_ids: string[]; created_at: number }[];
 }
+
+const REMIND = [null, 5, 15, 30, 60] as const;
 
 const dayLabel = (t: number) => {
   const d = new Date(t);
@@ -210,8 +213,40 @@ function Inbox() {
                       <option key={p}>{p}</option>
                     ))}
                   </select>
+                  <select
+                    className="rounded-md bg-transparent text-[12.5px] text-[var(--ink-2)] outline-none hover:bg-[var(--hover)]"
+                    title="How long this client may wait before you're reminded"
+                    value={c.remindAfter ?? ""}
+                    onChange={(e) => action({ action: "remind_after", minutes: e.target.value === "" ? null : Number(e.target.value) }, "Reminder time saved")}
+                  >
+                    {[...new Set([...REMIND, c.remindAfter ?? null])].map((m) => (
+                      <option key={m ?? "d"} value={m ?? ""}>
+                        {m === null ? "Remind: default" : `Remind after ${m} min`}
+                      </option>
+                    ))}
+                  </select>
                   {c.demo && <Pill>Test data</Pill>}
                 </div>
+                {!!detail.links?.length && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {detail.links.map((l) => {
+                      const status = board?.tasks?.find((t) => t.id === l.task_id)?.status;
+                      return (
+                        <a
+                          key={l.task_id}
+                          href={l.url ?? undefined}
+                          target="_blank"
+                          title={`Created ${ago(l.created_at, now)} from ${l.message_ids.length} message${l.message_ids.length === 1 ? "" : "s"}`}
+                          className="inline-flex max-w-[280px] items-center gap-1.5 rounded-full border border-[var(--line)] px-2 py-[1px] text-[12px] hover:bg-[var(--hover)]"
+                        >
+                          <ListPlus size={11} className="shrink-0 text-[var(--muted)]" />
+                          <span className="truncate">{l.title}</span>
+                          {status && <Pill tone={STATUS_TONE(status)}>{status}</Pill>}
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               <button className={`btn btn-sm ${selecting ? "btn-dark" : ""}`} onClick={startTask}>
                 <ListPlus size={14} /> {selecting ? `Create task from ${sel.size}` : "Create task"}
@@ -341,6 +376,12 @@ function Inbox() {
       {drawer && detail && (
         <TaskDrawer
           messages={detail.messages.filter((m) => sel.has(m.id)).map(text)}
+          messageIds={detail.messages.filter((m) => sel.has(m.id)).map((m) => m.id)}
+          convId={c?.id}
+          onCreated={() => {
+            load();
+            api<BoardLite>("/api/team?refresh=1").then(setBoard).catch(() => {});
+          }}
           project={c?.project ?? null}
           board={board}
           onClose={() => {

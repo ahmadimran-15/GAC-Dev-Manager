@@ -16,6 +16,7 @@ export default function DraftCard({ d, now, inThread = false }: { d: DraftRow; n
   const [from, setFrom] = useState("");
   const [target, setTarget] = useState<RecipientTarget | null>(null);
   const [busy, setBusy] = useState(false);
+  const [instruction, setInstruction] = useState("");
 
   async function act(action: "approve" | "discard") {
     setBusy(true);
@@ -31,10 +32,13 @@ export default function DraftCard({ d, now, inThread = false }: { d: DraftRow; n
     }
   }
 
-  async function polish() {
+  // No instruction = polish; with one = rewrite the way you asked (e.g. "shorter, mention Friday deadline")
+  async function improve() {
     setBusy(true);
     try {
-      setText((await api<{ text: string }>("/api/ai", { mode: "polish", text })).text);
+      const body = instruction.trim() ? { mode: "rewrite", text, instructions: instruction.trim() } : { mode: "polish", text };
+      setText((await api<{ text: string }>("/api/ai", body)).text);
+      setInstruction("");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Gemini failed", "error");
     } finally {
@@ -55,6 +59,19 @@ export default function DraftCard({ d, now, inThread = false }: { d: DraftRow; n
         {d.project && <Pill>{d.project}</Pill>}
       </div>
       <textarea className="input min-h-[64px] resize-none text-[13.5px] leading-relaxed" rows={3} value={text} onChange={(e) => setText(e.target.value)} />
+      <div className="mt-2 flex gap-1.5">
+        <input
+          className="input !h-8 !py-0 text-[13px]"
+          dir="auto"
+          placeholder="Rewrite instruction, e.g. shorter, more formal, add the Friday deadline"
+          value={instruction}
+          onChange={(e) => setInstruction(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && instruction.trim() && !busy && improve()}
+        />
+        <button className="btn btn-sm shrink-0" disabled={busy || !text.trim()} onClick={improve}>
+          <Sparkles size={13} /> {instruction.trim() ? "Rewrite" : "Polish"}
+        </button>
+      </div>
 
       <div className="mt-2.5 space-y-2">
         {d.conv_id && (
@@ -72,9 +89,6 @@ export default function DraftCard({ d, now, inThread = false }: { d: DraftRow; n
       </div>
 
       <div className="mt-2.5 flex items-center gap-1.5">
-        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={polish}>
-          <Sparkles size={13} /> Polish
-        </button>
         <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => act("discard")}>
           Discard
         </button>

@@ -137,6 +137,8 @@ export interface Task {
   spentMin: number;
   estimateMin: number | null;
   url?: string;
+  dueAt?: number | null; // ms, for on-time stats
+  doneAt?: number | null;
 }
 
 export const DEMO_PROJECTS = ["Custom Door", "MJP Dashboard", "Jarvis App", "Lemlist → n8n", "MI Optica"];

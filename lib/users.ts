@@ -12,6 +12,7 @@ export interface User {
   name: string;
   role: Role;
   active: boolean;
+  clickupName: string | null; // their ClickUp username, for "My tasks" and timers
   lastLogin: number | null;
   createdAt: number;
 }
@@ -23,11 +24,12 @@ interface Row {
   role: Role;
   password_hash: string;
   active: number;
+  clickup_name: string | null;
   last_login: number | null;
   created_at: number;
 }
 
-const toUser = (r: Row): User => ({ id: r.id, email: r.email, name: r.name, role: r.role, active: !!r.active, lastLogin: r.last_login ? Number(r.last_login) : null, createdAt: Number(r.created_at) });
+const toUser = (r: Row): User => ({ id: r.id, email: r.email, name: r.name, role: r.role, active: !!r.active, clickupName: r.clickup_name ?? null, lastLogin: r.last_login ? Number(r.last_login) : null, createdAt: Number(r.created_at) });
 
 export function hashPassword(pw: string) {
   const salt = randomBytes(16);
@@ -72,15 +74,15 @@ export async function getUser(id: string) {
   return r ? toUser(r) : null;
 }
 
-export async function createUser(u: { email: string; name: string; role: Role; password: string }) {
+export async function createUser(u: { email: string; name: string; role: Role; password: string; clickupName?: string | null }) {
   if (u.password.length < 8) throw new Error("Password must be at least 8 characters");
   if (await get("select 1 from users where lower(email) = lower(?)", u.email.trim())) throw new Error("A login with this email already exists");
   const id = uid("u_");
-  await run("insert into users (id, email, name, role, password_hash, created_at) values (?,?,?,?,?,?)", id, u.email.trim().toLowerCase(), u.name.trim(), u.role, hashPassword(u.password), Date.now());
+  await run("insert into users (id, email, name, role, password_hash, clickup_name, created_at) values (?,?,?,?,?,?,?)", id, u.email.trim().toLowerCase(), u.name.trim(), u.role, hashPassword(u.password), u.clickupName || null, Date.now());
   return id;
 }
 
-export async function updateUser(id: string, f: { name?: string; active?: boolean; password?: string; role?: Role }) {
+export async function updateUser(id: string, f: { name?: string; active?: boolean; password?: string; role?: Role; clickupName?: string | null }) {
   if (f.password !== undefined) {
     if (f.password.length < 8) throw new Error("Password must be at least 8 characters");
     await run("update users set password_hash = ? where id = ?", hashPassword(f.password), id);
@@ -88,6 +90,7 @@ export async function updateUser(id: string, f: { name?: string; active?: boolea
   if (f.name !== undefined) await run("update users set name = ? where id = ?", f.name.trim(), id);
   if (f.active !== undefined) await run("update users set active = ? where id = ?", f.active ? 1 : 0, id);
   if (f.role !== undefined) await run("update users set role = ? where id = ?", f.role, id);
+  if (f.clickupName !== undefined) await run("update users set clickup_name = ? where id = ?", f.clickupName || null, id);
 }
 
 export async function deleteUser(id: string) {

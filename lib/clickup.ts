@@ -1,4 +1,5 @@
 import { DEMO_PROJECTS, DEMO_TASKS, DEMO_TEAM, type Task } from "@/lib/demo";
+import { kvGet, kvSet } from "@/lib/db";
 
 // ClickUp is the source of truth. Each list is a project; folders are the project's stage
 // (Current Projects, Pending From Client, Dev Completed Projects, ...). The dashboard tracks
@@ -75,6 +76,8 @@ const mapTask = (t: Any): Task => ({
   spentMin: Math.round(Number(t.time_spent ?? 0) / 60000),
   estimateMin: t.time_estimate ? Math.round(Number(t.time_estimate) / 60000) : null,
   url: t.url,
+  dueAt: t.due_date ? Number(t.due_date) : null,
+  doneAt: t.date_done ? Number(t.date_done) : t.date_closed ? Number(t.date_closed) : null,
 });
 
 async function tasksWhere(query: string, maxPages = 5) {
@@ -252,6 +255,28 @@ export async function registerClickupWebhook(endpoint: string) {
   }
   const r = await cu(`/team/${team}/webhook`, { method: "POST", body: JSON.stringify({ endpoint, events }) });
   return { id: String(r.id), secret: String(r.webhook?.secret ?? "") };
+}
+
+// Registers our webhook at PUBLIC_URL and remembers its secret. Skips the call when nothing changed
+// (unless forced). The owner's n8n webhooks are never touched: only ours (/api/webhooks/clickup) is matched.
+export async function ensureClickupWebhook(force = false) {
+  const base = process.env.PUBLIC_URL?.replace(/\/$/, "");
+  if (!token()) throw new Error("CLICKUP_TOKEN is not set");
+  if (!base) throw new Error("PUBLIC_URL is not set");
+  const endpoint = `${base}/api/webhooks/clickup`;
+  const saved = JSON.parse((await kvGet("clickup_webhook")) ?? "null") as { id: string; secret: string; endpoint: string } | null;
+  if (!force && saved?.endpoint === endpoint && saved.secret) return { ...saved, changed: false };
+  const r = await registerClickupWebhook(endpoint);
+  // Keep the old secret if ClickUp didn't send one back on an update
+  const hook = { id: r.id, secret: r.secret || (saved?.id === r.id ? saved.secret : ""), endpoint, at: Date.now() };
+  await kvSet("clickup_webhook", JSON.stringify(hook));
+  return { ...hook, changed: true };
+}
+
+export async function clickupWebhookInfo() {
+  const saved = JSON.parse((await kvGet("clickup_webhook")) ?? "null") as { id: string; endpoint: string; at?: number } | null;
+  const last = await kvGet("clickup_last_event");
+  return { registered: saved ? { id: saved.id, endpoint: saved.endpoint, at: saved.at ?? null } : null, lastEvent: last ? Number(last) : null };
 }
 
 // Where a project sits right now (e.g. "Pending From Client"), for warnings and the assistant.

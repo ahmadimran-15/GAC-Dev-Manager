@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Copy } from "lucide-react";
 import { api, useLive } from "@/components/Live";
 import { reminderSettings } from "@/components/Reminders";
 import AccountsManager from "@/components/AccountsManager";
@@ -22,20 +21,43 @@ function Row({ name, ok, detail, children }: { name: string; ok: boolean | null;
   );
 }
 
-function CopyField({ value }: { value: string }) {
+// Our ClickUp status webhook: registered at PUBLIC_URL on startup, or here on demand. n8n's are left alone.
+function ClickUpWebhook({ publicUrl }: { publicUrl: string | null }) {
   const { toast } = useLive();
+  const [info, setInfo] = useState<{ registered: { endpoint: string; at: number | null } | null; lastEvent: number | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => api<NonNullable<typeof info>>("/api/clickup").then(setInfo).catch(() => {});
+  useEffect(() => {
+    load();
+  }, []);
+  const want = publicUrl ? `${publicUrl.replace(/\/$/, "")}/api/webhooks/clickup` : null;
+  const stale = !!want && info?.registered?.endpoint !== want;
   return (
-    <div className="mt-2 flex items-center gap-2 rounded-lg bg-[var(--bg)] px-3 py-2">
-      <code className="min-w-0 flex-1 truncate text-[12.5px]">{value}</code>
-      <button
-        className="btn btn-ghost btn-sm !h-6 !px-1.5"
-        onClick={() => {
-          navigator.clipboard?.writeText(value);
-          toast("Copied");
-        }}
-      >
-        <Copy size={12} />
-      </button>
+    <div className="mt-2 text-[12.5px] text-[var(--muted)]">
+      Status webhook (two-way status sync): {info?.registered ? <code>{info.registered.endpoint}</code> : "not registered"}
+      {info?.lastEvent ? ` · last event ${ago(info.lastEvent)}` : info?.registered ? " · no event yet" : ""}
+      {stale && <span className="text-[var(--amber)]"> · doesn&apos;t match PUBLIC_URL</span>}
+      <div className="mt-2">
+        <button
+          className="btn btn-sm"
+          disabled={busy || !publicUrl}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const r = await api<{ endpoint: string }>("/api/clickup", {});
+              toast(`ClickUp webhook → ${r.endpoint}`);
+              load();
+            } catch (e) {
+              toast(e instanceof Error ? e.message : "Failed", "error");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? "Registering…" : "Register ClickUp webhook"}
+        </button>
+        {!publicUrl && <span className="ml-2">Set PUBLIC_URL in .env first.</span>}
+      </div>
     </div>
   );
 }
@@ -107,6 +129,18 @@ export default function Settings() {
           ok={!!k?.reminderWhatsApp && !!k?.whatsapp}
           detail={k?.reminderWhatsApp ? "On. The server sends you a WhatsApp summary of waiting clients with suggested replies." : "Set REMINDER_WHATSAPP_TO (your number) and REMINDER_MINUTES in .env to get reminders on your phone too."}
         />
+        <Row
+          name="Email reminders"
+          ok={k?.reminderEmail ? (state?.accounts ?? []).some((a) => a.kind === "email" && a.enabled && a.status?.ok) : null}
+          detail={
+            k?.reminderEmail
+              ? (state?.accounts ?? []).some((a) => a.kind === "email" && a.enabled && a.status?.ok)
+                ? `On. The same summary goes to ${k.reminderEmail} from your first working mailbox.`
+                : `Set to ${k.reminderEmail}, but no mailbox can log in yet. Fix a mailbox below.`
+              : "Set REMINDER_EMAIL_TO in .env to also get the summary by email."
+          }
+        />
+        <div className="py-3 text-[12.5px] text-[var(--muted)]">Each client can have its own reminder time: open the conversation in the inbox and pick “Remind after”.</div>
       </div>
 
       <h2 id="accounts" className="mb-1 mt-10 text-[13.5px] font-semibold">Mailboxes &amp; WhatsApp numbers</h2>
@@ -137,8 +171,7 @@ export default function Settings() {
           }
         />
         <Row name="ClickUp" ok={k ? k.clickup : null} detail={k?.clickup ? "Connected. Tracks the Current Projects folder; new tasks go into the project's list there." : "Add CLICKUP_TOKEN (and CLICKUP_TEAM_ID) to .env."}>
-          <div className="mt-2 text-[12.5px] text-[var(--muted)]">Status-change webhook (for the tamper-proof time log):</div>
-          <CopyField value={`${origin}/api/webhooks/clickup`} />
+          {k?.clickup && <ClickUpWebhook publicUrl={k.publicUrl} />}
         </Row>
       </div>
 

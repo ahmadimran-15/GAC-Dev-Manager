@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
+import { allMembers } from "@/lib/clickup";
 import { adminCount, createUser, deleteUser, getUser, listUsers, updateUser, type Role } from "@/lib/users";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ users: await listUsers(), me: await currentUser() });
+  const members = await allMembers().catch(() => [] as string[]);
+  return NextResponse.json({ users: await listUsers(), me: await currentUser(), members });
 }
 
 // Owner manages logins: add teammates, reset passwords, pause or remove access, change own password.
@@ -16,12 +18,12 @@ export async function POST(req: Request) {
     switch (b.action) {
       case "create":
         if (!b.email || !b.name || !b.password) return NextResponse.json({ error: "Name, email and password are required" }, { status: 400 });
-        return NextResponse.json({ id: await createUser({ email: b.email, name: b.name, password: b.password, role: (b.role === "admin" ? "admin" : "team") as Role }) });
+        return NextResponse.json({ id: await createUser({ email: b.email, name: b.name, password: b.password, role: (b.role === "admin" ? "admin" : "team") as Role, clickupName: b.clickupName || null }) });
       case "update": {
         const target = await getUser(b.id);
         if (!target) return NextResponse.json({ error: "Login not found" }, { status: 404 });
         if (target.role === "admin" && (b.active === false || b.role === "team") && (await adminCount()) <= 1) return NextResponse.json({ error: "You can't remove the last owner login" }, { status: 400 });
-        await updateUser(b.id, { name: b.name, active: b.active, password: b.password || undefined, role: b.role });
+        await updateUser(b.id, { name: b.name, active: b.active, password: b.password || undefined, role: b.role, clickupName: b.clickupName });
         return NextResponse.json({ ok: true });
       }
       case "delete": {

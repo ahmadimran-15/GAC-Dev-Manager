@@ -2,7 +2,7 @@ import { logEvent } from "@/lib/db";
 import { aiConfigured, suggestReply, transcribe, transcriptionConfigured } from "@/lib/ai";
 import { accountForSession, downloadMedia, parseIncoming, sendWhatsApp, waConfigured } from "@/lib/whatsapp";
 import { pollAll, sendEmail } from "@/lib/email";
-import { defaultSender, getAccount } from "@/lib/accounts";
+import { defaultSender, getAccount, listAccounts } from "@/lib/accounts";
 import { trackGroup, trackedGroups } from "@/lib/groups";
 import { addMessage, findOrCreateConversation, getConversation, getMessages, listConversations, updateConversation, updateMessage } from "@/lib/store";
 
@@ -158,27 +158,51 @@ async function pollEmail() {
   }
 }
 
-// Sends you a WhatsApp summary of clients still waiting, with the suggested reply for each.
-async function remindOnWhatsApp() {
-  const to = process.env.REMINDER_WHATSAPP_TO;
-  if (!to || !(await waConfigured())) return;
+// Sends you a summary of clients still waiting, with the suggested reply for each: on WhatsApp
+// (REMINDER_WHATSAPP_TO) and/or by email (REMINDER_EMAIL_TO, sent from the first working mailbox).
+// Each client can have its own "remind after" time; otherwise REMINDER_AFTER_MINUTES applies.
+async function sendReminders() {
+  const waTo = process.env.REMINDER_WHATSAPP_TO;
+  const mailTo = process.env.REMINDER_EMAIL_TO;
+  const useWa = !!waTo && (await waConfigured());
+  const mailFrom = mailTo ? await reminderMailbox() : null;
+  if (!useWa && !mailFrom) return;
   const every = Number(process.env.REMINDER_MINUTES ?? 10) * 60_000;
-  const after = Number(process.env.REMINDER_AFTER_MINUTES ?? 5) * 60_000;
+  const defaultAfter = Number(process.env.REMINDER_AFTER_MINUTES ?? 5);
   const now = Date.now();
   const due = [];
   for (const c of await listConversations()) {
-    if (!c.waiting || c.demo || !c.waitingSince || now - c.waitingSince < after) continue;
+    if (!c.waiting || c.demo || !c.waitingSince || now - c.waitingSince < (c.remindAfter ?? defaultAfter) * 60_000) continue;
     const conv = await getConversation(c.id);
     if (!conv?.reminded_at || now - Number(conv.reminded_at) > every) due.push(c);
   }
   if (!due.length) return;
-  const lines = due.map((c) => {
-    const mins = Math.round((now - (c.waitingSince ?? now)) / 60000);
-    return `• *${c.name}* (${c.channel}, waiting ${mins}m)\n  "${(c.last?.text ?? "").slice(0, 90)}"${c.suggestion ? `\n  Suggested: ${c.suggestion}` : ""}`;
-  });
-  const url = process.env.PUBLIC_URL ? `\n\nOpen: ${process.env.PUBLIC_URL}` : "";
-  const r = await sendWhatsApp(to, `⏰ ${due.length} client${due.length > 1 ? "s" : ""} waiting for your reply\n\n${lines.join("\n\n")}${url}`);
-  if (r.ok) for (const c of due) await updateConversation(c.id, { reminded_at: now });
+  const title = `${due.length} client${due.length > 1 ? "s" : ""} waiting for your reply`;
+  const url = process.env.PUBLIC_URL;
+  let ok = false;
+  if (useWa) {
+    const lines = due.map((c) => {
+      const mins = Math.round((now - (c.waitingSince ?? now)) / 60000);
+      return `• *${c.name}* (${c.channel}, waiting ${mins}m)\n  "${(c.last?.text ?? "").slice(0, 90)}"${c.suggestion ? `\n  Suggested: ${c.suggestion}` : ""}`;
+    });
+    ok = (await sendWhatsApp(waTo!, `⏰ ${title}\n\n${lines.join("\n\n")}${url ? `\n\nOpen: ${url}` : ""}`)).ok || ok;
+  }
+  if (mailFrom) {
+    const lines = due.map((c) => {
+      const mins = Math.round((now - (c.waitingSince ?? now)) / 60000);
+      return `${c.name} (${c.channel}, waiting ${mins} min)\n  "${(c.last?.text ?? "").slice(0, 200)}"${c.suggestion ? `\n  Suggested reply: ${c.suggestion}` : ""}${url ? `\n  Open: ${url}/inbox?c=${c.id}` : ""}`;
+    });
+    const r = await sendEmail(mailFrom, mailTo!, `GAC Desk: ${title}`, `${title}\n\n${lines.join("\n\n")}`, false).catch((e) => ({ ok: false, error: String(e) }));
+    if (!r.ok) log("reminder-email-error", r);
+    ok = r.ok || ok;
+  }
+  if (ok) for (const c of due) await updateConversation(c.id, { reminded_at: now });
+}
+
+// The first enabled mailbox whose last check passed (falls back to any enabled one)
+async function reminderMailbox() {
+  const boxes = (await listAccounts()).filter((a) => a.kind === "email" && a.enabled && a.canSend);
+  return (boxes.find((a) => a.status?.ok) ?? boxes[0])?.id ?? null;
 }
 
 export function startWorker() {
@@ -189,7 +213,7 @@ export function startWorker() {
   // Mailboxes can be added any time in Settings, so always keep checking
   setTimeout(pollEmail, 5_000);
   setInterval(pollEmail, 60_000);
-  setInterval(() => remindOnWhatsApp().catch((e) => log("reminder-error", String(e))), 60_000);
+  setInterval(() => sendReminders().catch((e) => log("reminder-error", String(e))), 60_000);
 
   // Check every connection shortly after start, then every HEALTH_MINUTES (default 10)
   const health = () => import("@/lib/health").then((h) => h.runHealth()).catch((e) => log("health-error", String(e)));

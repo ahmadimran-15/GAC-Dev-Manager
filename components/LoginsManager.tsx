@@ -10,7 +10,21 @@ interface U {
   name: string;
   role: "admin" | "team";
   active: boolean;
+  clickupName: string | null;
   lastLogin: number | null;
+}
+
+function MemberSelect({ value, members, onChange, className = "" }: { value: string; members: string[]; onChange: (v: string) => void; className?: string }) {
+  return (
+    <select className={`input ${className}`} value={value} onChange={(e) => onChange(e.target.value)} title="Their ClickUp name: shows their tasks and timers in the portal">
+      <option value="">ClickUp member: none</option>
+      {[...new Set([...members, ...(value ? [value] : [])])].map((m) => (
+        <option key={m} value={m}>
+          ClickUp: {m}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 // Owner and team logins. Team members only get the update portal: no inbox, no contacts, no channels.
@@ -19,10 +33,11 @@ export default function LoginsManager() {
   const [users, setUsers] = useState<U[]>([]);
   const [me, setMe] = useState<{ id: string } | null>(null);
   const [adding, setAdding] = useState(false);
-  const [f, setF] = useState({ name: "", email: "", password: "", role: "team" });
+  const [f, setF] = useState({ name: "", email: "", password: "", role: "team", clickupName: "" });
   const [myPw, setMyPw] = useState("");
+  const [members, setMembers] = useState<string[]>([]);
 
-  const load = () => api<{ users: U[]; me: { id: string } }>("/api/users").then((r) => (setUsers(r.users), setMe(r.me)));
+  const load = () => api<{ users: U[]; me: { id: string }; members: string[] }>("/api/users").then((r) => (setUsers(r.users), setMe(r.me), setMembers(r.members ?? [])));
   useEffect(() => {
     load();
   }, []);
@@ -56,13 +71,14 @@ export default function LoginsManager() {
             <option value="team">Team member (update portal only)</option>
             <option value="admin">Owner (full access)</option>
           </select>
-          <div className="col-span-2 flex justify-end">
+          <MemberSelect value={f.clickupName} members={members} onChange={(v) => setF({ ...f, clickupName: v })} />
+          <div className="flex items-center justify-end">
             <button
               className="btn btn-dark btn-sm"
               disabled={!f.name || !f.email || f.password.length < 8}
               onClick={async () => {
                 if (await call({ action: "create", ...f }, `${f.name} can now sign in`)) {
-                  setF({ name: "", email: "", password: "", role: "team" });
+                  setF({ name: "", email: "", password: "", role: "team", clickupName: "" });
                   setAdding(false);
                 }
               }}
@@ -82,6 +98,14 @@ export default function LoginsManager() {
               </div>
               <div className="text-[12px] text-[var(--muted)]">{u.lastLogin ? `Last sign-in ${ago(u.lastLogin)}` : "Never signed in"}</div>
             </div>
+            {u.role === "team" && (
+              <MemberSelect
+                className="!h-8 !w-[190px] !py-0 !text-[12.5px]"
+                value={u.clickupName ?? ""}
+                members={members}
+                onChange={(v) => call({ action: "update", id: u.id, clickupName: v }, v ? `${u.name} linked to ClickUp “${v}”` : "ClickUp link removed")}
+              />
+            )}
             <Pill tone={u.role === "admin" ? "dark" : "gray"}>{u.role === "admin" ? "Owner" : "Team"}</Pill>
             {u.id !== me?.id && (
               <>

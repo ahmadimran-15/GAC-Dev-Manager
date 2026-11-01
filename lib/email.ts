@@ -111,14 +111,15 @@ export async function pollAll(onNew: (convId: string) => void) {
   }
 }
 
-export async function sendEmail(fromAccountId: string, to: string, subject: string | null, text: string) {
+// reply=false sends a fresh message (no "Re:"), e.g. reminders to yourself
+export async function sendEmail(fromAccountId: string, to: string, subject: string | null, text: string, reply = true) {
   const acc = await getAccount(fromAccountId);
   if (!acc) return { ok: false, error: "That mailbox no longer exists" };
   try {
     const info = await smtpTransport(acc).sendMail({
       from: acc.label && !acc.label.includes("@") ? `"${acc.label}" <${acc.address}>` : acc.address,
       to,
-      subject: subject ? (/^re:/i.test(subject) ? subject : `Re: ${subject}`) : "Re: your message",
+      subject: !reply ? (subject ?? "") : subject ? (/^re:/i.test(subject) ? subject : `Re: ${subject}`) : "Re: your message",
       text,
     });
     return { ok: true, id: info.messageId };

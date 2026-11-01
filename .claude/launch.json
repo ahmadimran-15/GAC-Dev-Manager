@@ -6,6 +6,13 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 3000
+    },
+    {
+      "name": "test-build",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "start", "-p", "3100"],
+      "env": { "NEXT_DIST_DIR": ".next-test", "DISABLE_WORKER": "1" },
+      "port": 3100
     }
   ]
 }

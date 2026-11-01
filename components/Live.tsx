@@ -46,6 +46,7 @@ export interface LiveState {
     whatsappLastEvent: number | null;
     whatsappSecret: boolean;
     reminderWhatsApp: boolean;
+    reminderEmail: string | null;
     publicUrl: string | null;
     clickup: boolean;
   };

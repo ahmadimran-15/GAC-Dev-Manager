@@ -58,7 +58,8 @@ export default function Reminders() {
 
   const { after } = typeof window === "undefined" ? { after: 2 } : reminderSettings.get();
   const snoozed = typeof window === "undefined" ? {} : snoozes();
-  const due = (state?.conversations ?? []).filter((c) => c.waiting && c.waitingSince && mins(c.waitingSince, now) >= after && !(snoozed[c.id] > Date.now()));
+  // A client's own reminder time (set in the inbox thread) wins over the default
+  const due = (state?.conversations ?? []).filter((c) => c.waiting && c.waitingSince && mins(c.waitingSince, now) >= (c.remindAfter ?? after) && !(snoozed[c.id] > Date.now()));
 
   useEffect(() => {
     const check = () => {

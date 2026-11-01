@@ -13,6 +13,7 @@ export interface Conversation {
   suggestion: string | null;
   suggestion_for: string | null;
   reminded_at: number | null;
+  remind_after: number | null; // minutes before reminders start for this client (null = default)
   demo: number;
   created_at: number;
 }
@@ -49,6 +50,7 @@ export interface ConvSummary {
   unanswered: number;
   acknowledged: boolean;
   suggestion: string | null;
+  remindAfter: number | null;
   last: { text: string; kind: string; direction: string; at: number } | null;
 }
 
@@ -138,6 +140,7 @@ async function summaries(where = "", ...p: unknown[]): Promise<ConvSummary[]> {
       unanswered: waiting ? Number(c.pend_n) : 0,
       acknowledged: !waiting && !!c.lo_ack,
       suggestion: waiting ? c.suggestion : null,
+      remindAfter: c.remind_after === null || c.remind_after === undefined ? null : Number(c.remind_after),
       last: last ? { text: msgText(last), kind: last.kind, direction: last.direction, at: Number(last.created_at) } : null,
     };
   });
