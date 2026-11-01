@@ -1,19 +1,38 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, readSession } from "@/lib/session";
+import { SESSION_COOKIE, SESSION_MAX_AGE, cookieOptions, createSession, isHttps, readSession } from "@/lib/session";
 
-// Everything needs a login except the login page, incoming webhooks and the team reply link.
-const PUBLIC = [/^\/login/, /^\/api\/auth\//, /^\/api\/webhooks\//, /^\/team-reply\//, /^\/api\/team-drafts/];
+// Login required everywhere except the login page and incoming webhooks.
+// Team members only reach their portal; everything else is the owner's.
+const PUBLIC = [/^\/login/, /^\/api\/auth\//, /^\/api\/webhooks\//];
+const TEAM_ALLOWED = [/^\/portal/, /^\/api\/portal/];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (PUBLIC.some((r) => r.test(pathname))) return NextResponse.next();
-  const user = await readSession(req.cookies.get(SESSION_COOKIE)?.value);
-  if (user) return NextResponse.next();
-  if (pathname.startsWith("/api/")) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  const url = req.nextUrl.clone();
-  url.pathname = "/login";
-  url.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname)}`;
-  return NextResponse.redirect(url);
+
+  const s = await readSession(req.cookies.get(SESSION_COOKIE)?.value);
+  if (!s) {
+    if (pathname.startsWith("/api/")) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+    const url = req.nextUrl.clone();
+    url.pathname = "/login";
+    url.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname)}`;
+    return NextResponse.redirect(url);
+  }
+
+  if (s.role === "team" && !TEAM_ALLOWED.some((r) => r.test(pathname))) {
+    if (pathname.startsWith("/api/")) return NextResponse.json({ error: "Not allowed" }, { status: 403 });
+    const url = req.nextUrl.clone();
+    url.pathname = "/portal";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
+  const res = NextResponse.next();
+  // Keep active users signed in: renew the cookie once it's past half its life
+  if (s.exp - Date.now() < (SESSION_MAX_AGE * 1000) / 2) {
+    res.cookies.set(SESSION_COOKIE, await createSession(s), cookieOptions(isHttps(req)));
+  }
+  return res;
 }
 
 export const config = {

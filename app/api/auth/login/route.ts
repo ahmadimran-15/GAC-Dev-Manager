@@ -1,29 +1,21 @@
 import { NextResponse } from "next/server";
-import { timingSafeEqual } from "crypto";
-import { SESSION_COOKIE, SESSION_MAX_AGE, createSession } from "@/lib/session";
+import { SESSION_COOKIE, cookieOptions, createSession, isHttps } from "@/lib/session";
+import { verifyLogin } from "@/lib/users";
 
-const same = (a: string, b: string) => {
-  const x = Buffer.from(a);
-  const y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
-};
-
-// Single owner account, set in .env (ADMIN_EMAIL / ADMIN_PASSWORD).
+// Owner and team logins, stored in the database (passwords hashed with scrypt).
 export async function POST(req: Request) {
   const { email, password } = await req.json().catch(() => ({}));
-  const { ADMIN_EMAIL, ADMIN_PASSWORD } = process.env;
-  if (!ADMIN_EMAIL || !ADMIN_PASSWORD) return NextResponse.json({ error: "Set ADMIN_EMAIL and ADMIN_PASSWORD in .env" }, { status: 500 });
-  if (!same(String(email ?? "").trim().toLowerCase(), ADMIN_EMAIL.toLowerCase()) || !same(String(password ?? ""), ADMIN_PASSWORD)) {
-    await new Promise((r) => setTimeout(r, 600));
-    return NextResponse.json({ error: "Wrong email or password" }, { status: 401 });
+  if (!email || !password) return NextResponse.json({ error: "Enter your email and password" }, { status: 400 });
+  try {
+    const u = await verifyLogin(String(email), String(password));
+    if (!u) {
+      await new Promise((r) => setTimeout(r, 600));
+      return NextResponse.json({ error: "Wrong email or password" }, { status: 401 });
+    }
+    const res = NextResponse.json({ ok: true, role: u.role, home: u.role === "admin" ? "/" : "/portal" });
+    res.cookies.set(SESSION_COOKIE, await createSession(u), cookieOptions(isHttps(req)));
+    return res;
+  } catch (e) {
+    return NextResponse.json({ error: `Can't reach the database: ${e instanceof Error ? e.message : e}` }, { status: 503 });
   }
-  const res = NextResponse.json({ ok: true });
-  res.cookies.set(SESSION_COOKIE, await createSession(ADMIN_EMAIL), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production" && !!process.env.PUBLIC_URL?.startsWith("https"),
-    path: "/",
-    maxAge: SESSION_MAX_AGE,
-  });
-  return res;
 }

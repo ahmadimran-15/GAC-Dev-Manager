@@ -37,6 +37,7 @@ export interface Message {
 export interface ConvSummary {
   id: string;
   channel: string;
+  externalId: string; // email address, phone number or WhatsApp group id (owner view only)
   account: string;
   name: string;
   company: string | null;
@@ -125,6 +126,7 @@ async function summaries(where = "", ...p: unknown[]): Promise<ConvSummary[]> {
     return {
       id: c.id,
       channel: c.channel,
+      externalId: c.external_id,
       account: c.account,
       name: c.name,
       company: c.company,
@@ -197,14 +199,14 @@ export function listDrafts() {
   );
 }
 
-export async function addDraft(d: { conv_id: string | null; project: string | null; author: string; text: string }) {
+export async function addDraft(d: { conv_id: string | null; project: string | null; author: string; author_id?: string | null; text: string }) {
   const id = uid("d_");
-  await run("insert into drafts (id, conv_id, project, author, text, created_at) values (?,?,?,?,?,?)", id, d.conv_id, d.project, d.author, d.text, Date.now());
+  await run("insert into drafts (id, conv_id, project, author, author_id, text, created_at) values (?,?,?,?,?,?,?)", id, d.conv_id, d.project, d.author, d.author_id ?? null, d.text, Date.now());
   return id;
 }
 
-export async function setDraftStatus(id: string, status: "approved" | "discarded") {
-  await run("update drafts set status = ? where id = ?", status, id);
+export async function setDraftStatus(id: string, status: "approved" | "discarded", sentTo?: string) {
+  await run("update drafts set status = ?, sent_to = ? where id = ?", status, sentTo ?? null, id);
 }
 
 export const getDraft = (id: string) => get<Draft>("select * from drafts where id = ?", id);

@@ -38,6 +38,16 @@ export default function TopNav() {
           })}
         </nav>
         <div className="ml-auto flex items-center gap-1.5">
+          {!!state?.health?.problems.length && (
+            <Link
+              href="/settings#health"
+              title={state.health.problems.join("\n")}
+              className="mr-1 inline-flex items-center gap-1.5 rounded-full bg-[#fdecec] px-2.5 py-1 text-[12px] font-medium text-[#c7353a] hover:bg-[#fbdcdc]"
+            >
+              <span className="dot" style={{ background: "var(--red)" }} />
+              {state.health.problems.length} issue{state.health.problems.length > 1 ? "s" : ""}
+            </Link>
+          )}
           <button onClick={openAssistant} className="flex h-9 w-[260px] items-center gap-2 rounded-xl border border-[var(--line-2)] bg-white px-3 text-[13px] text-[var(--muted)] transition hover:border-[#c9c9c3]">
             <Mic size={15} className="text-[var(--ink)]" />
             Ask or tell me what to do
@@ -46,7 +56,7 @@ export default function TopNav() {
           <Reminders />
           <div className="relative">
             <button className="grid h-9 w-9 place-items-center rounded-full bg-[#171717] text-[12px] font-semibold text-white" onClick={() => setMenu((m) => !m)}>
-              Me
+              {(state?.me?.name ?? "Me").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
             </button>
             {menu && (
               <div className="pop-in absolute right-0 top-11 w-44 rounded-xl border border-[var(--line)] bg-white p-1 shadow-lg">

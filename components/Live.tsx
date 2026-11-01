@@ -5,6 +5,7 @@ import type { ConvSummary } from "@/lib/store";
 export interface DraftRow {
   id: string;
   conv_id: string | null;
+  project?: string | null;
   author: string;
   text: string;
   created_at: number;
@@ -29,6 +30,8 @@ export const accountOf = (accounts: AccountLite[] | undefined, key: string | nul
 
 export interface LiveState {
   now: number;
+  me: { name: string; email: string; role: "admin" | "team" } | null;
+  health: { at: number; problems: string[] } | null;
   conversations: ConvSummary[];
   drafts: DraftRow[];
   stats: { waiting: number; firstReplyAvg: number | null; repliesToday: number };

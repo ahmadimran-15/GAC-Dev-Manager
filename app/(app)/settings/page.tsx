@@ -4,6 +4,9 @@ import { Copy } from "lucide-react";
 import { api, useLive } from "@/components/Live";
 import { reminderSettings } from "@/components/Reminders";
 import AccountsManager from "@/components/AccountsManager";
+import HealthPanel from "@/components/HealthPanel";
+import LoginsManager from "@/components/LoginsManager";
+import GroupsManager from "@/components/GroupsManager";
 import { ago } from "@/components/ui";
 
 function Row({ name, ok, detail, children }: { name: string; ok: boolean | null; detail: React.ReactNode; children?: React.ReactNode }) {
@@ -40,7 +43,6 @@ function CopyField({ value }: { value: string }) {
 export default function Settings() {
   const { state, refresh, toast } = useLive();
   const [origin, setOrigin] = useState("");
-  const [links, setLinks] = useState<{ name: string; token: string }[]>([]);
   const [every, setEvery] = useState(5);
   const [after, setAfter] = useState(2);
   const [notif, setNotif] = useState("default");
@@ -51,7 +53,6 @@ export default function Settings() {
     setEvery(s.every);
     setAfter(s.after);
     if ("Notification" in window) setNotif(Notification.permission);
-    api<{ links: { name: string; token: string }[] }>("/api/team").then((r) => setLinks(r.links ?? []));
   }, []);
 
   const k = state?.connections;
@@ -65,7 +66,10 @@ export default function Settings() {
   return (
     <div className="fade-in mx-auto max-w-[820px] px-6 pb-20 pt-10">
       <h1 className="text-[30px] font-semibold tracking-tight">Settings</h1>
-      <p className="mt-1 text-[15px] text-[var(--ink-2)]">Connections, reminders and team links. Keys live in the server&apos;s .env file.</p>
+      <p className="mt-1 text-[15px] text-[var(--ink-2)]">System health, accounts, logins and reminders.</p>
+
+      <h2 id="health" className="mb-1 mt-10 text-[13.5px] font-semibold">System health</h2>
+      <HealthPanel />
 
       <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Reminders</h2>
       <div className="card divide-y divide-[var(--line)] px-5">
@@ -105,7 +109,7 @@ export default function Settings() {
         />
       </div>
 
-      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Mailboxes &amp; WhatsApp numbers</h2>
+      <h2 id="accounts" className="mb-1 mt-10 text-[13.5px] font-semibold">Mailboxes &amp; WhatsApp numbers</h2>
       <p className="mb-3 text-[13px] text-[var(--ink-2)]">Every place clients can reach the company. New messages land in your inbox only; replies are sent by this server from the account you pick. Your team never gets these passwords.</p>
       <AccountsManager />
       <div className="mt-2 text-[12.5px] text-[var(--muted)]">
@@ -138,16 +142,11 @@ export default function Settings() {
         </Row>
       </div>
 
-      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Team reply links</h2>
-      <div className="card px-5 py-4">
-        <p className="text-[13px] text-[var(--ink-2)]">Each teammate gets a private link to write client updates. Drafts come to you for approval and are sent from your account. They never see client numbers or emails. Set TEAM_TOKENS in .env.</p>
-        {links.map((l) => (
-          <div key={l.token} className="mt-3">
-            <div className="text-[13px] font-medium">{l.name}</div>
-            <CopyField value={`${origin}/team-reply/${l.token}`} />
-          </div>
-        ))}
-      </div>
+      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">WhatsApp groups in the inbox</h2>
+      <GroupsManager />
+
+      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Logins</h2>
+      <LoginsManager />
 
       {state?.hasDemo && (
         <>

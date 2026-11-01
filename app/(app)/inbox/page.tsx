@@ -1,7 +1,8 @@
 "use client";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CheckCheck, ListPlus, Mic, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
+import { CheckCheck, ListPlus, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
+import Composer from "@/components/Composer";
 import type { ConvSummary, Message } from "@/lib/store";
 import { api, useLive, type DraftRow } from "@/components/Live";
 import { Avatar, CHANNELS, Channel, Pill, Waiting, ago } from "@/components/ui";
@@ -38,6 +39,7 @@ function Inbox() {
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
   const [from, setFrom] = useState("");
+  const [composing, setComposing] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [drawer, setDrawer] = useState(false);
@@ -141,9 +143,14 @@ function Inbox() {
         {/* List */}
         <div className="flex min-h-0 flex-col border-r border-[var(--line)]">
           <div className="space-y-2.5 p-4">
-            <div className="relative">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-              <input className="input !py-2 pl-9 text-[13.5px]" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+                <input className="input !py-2 pl-9 text-[13.5px]" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+              </div>
+              <button className="btn btn-dark !h-[38px] !px-3" title="New message to a WhatsApp group, contact or email" onClick={() => setComposing(true)}>
+                <PenSquare size={15} />
+              </button>
             </div>
             <div className="flex gap-1">
               {(["all", "waiting"] as const).map((f) => (
@@ -330,6 +337,7 @@ function Inbox() {
         )}
       </div>
 
+      {composing && <Composer onClose={() => setComposing(false)} />}
       {drawer && detail && (
         <TaskDrawer
           messages={detail.messages.filter((m) => sel.has(m.id)).map(text)}

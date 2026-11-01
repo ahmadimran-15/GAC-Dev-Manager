@@ -78,6 +78,8 @@ export function verifySignature(raw: string, header: string | null) {
 export interface Incoming {
   id: string;
   sessionId: string | null;
+  isGroup: boolean;
+  author: string; // who wrote it (in a group: the member)
   fromMe: boolean;
   phone: string; // the client's number (for your own messages: who you wrote to)
   chatId: string;
@@ -96,19 +98,23 @@ export function parseIncoming(body: any): Incoming | null {
   const m = d?.message ?? d;
   const fromMe = !!(m?.fromMe ?? (event === "message.sent" || m?.direction === "outgoing"));
   const chatId: string = String(m?.chatId ?? (fromMe ? m?.to : m?.from) ?? "");
-  if (!chatId || m?.isGroup || /@(g\.us|newsletter|broadcast)$/.test(chatId) || ["group", "channel", "status", "broadcast"].includes(m?.kind)) return null;
+  if (!chatId || /@(newsletter|broadcast)$/.test(chatId) || ["channel", "status", "broadcast"].includes(m?.kind)) return null;
+  const isGroup = !!m?.isGroup || chatId.endsWith("@g.us") || m?.kind === "group";
   const isLid = chatId.endsWith("@lid");
-  const phone = String((isLid ? (m?.senderPhone ?? m?.contact?.number) : null) ?? chatId.split("@")[0]).replace(/[^\d]/g, "") || chatId;
+  // Groups are keyed by their group id; people by phone number
+  const phone = isGroup ? chatId : String((isLid ? (m?.senderPhone ?? m?.contact?.number) : null) ?? chatId.split("@")[0]).replace(/[^\d]/g, "") || chatId;
   const type = String(m?.type ?? "text");
   const kind = type === "voice" || type === "audio" || type === "ptt" ? "voice" : type === "image" || type === "sticker" ? "image" : ["video", "document"].includes(type) ? "file" : "text";
   const ts = Number(m?.timestamp ?? body?.timestamp ?? 0);
   return {
     id: String(m?.id?._serialized ?? m?.id ?? m?.waMessageId ?? `${chatId}-${ts}`),
     sessionId: body?.sessionId ?? d?.sessionId ?? m?.sessionId ?? null,
+    isGroup,
+    author: String(m?.pushName ?? m?.notifyName ?? m?.senderName ?? m?.contact?.pushname ?? m?.author ?? ""),
     fromMe,
     phone,
     chatId,
-    name: String(m?.pushName ?? m?.notifyName ?? m?.chatName ?? m?.contact?.pushname ?? m?.contact?.name ?? d?.contact?.name ?? phone),
+    name: String((isGroup ? m?.chatName : null) ?? m?.pushName ?? m?.notifyName ?? m?.chatName ?? m?.contact?.pushname ?? m?.contact?.name ?? d?.contact?.name ?? phone),
     text: String(m?.body ?? m?.text ?? m?.caption ?? ""),
     kind,
     at: ts ? (ts < 1e12 ? ts * 1000 : ts) : Date.now(),
@@ -140,4 +146,51 @@ export async function downloadMedia(inc: Incoming): Promise<{ file: string; mime
     await new Promise((r) => setTimeout(r, 2000 * (attempt + 1))); // media may still be downloading on the gateway
   }
   return null;
+}
+
+// ---------- Groups and contacts for the recipient picker ----------
+
+export interface Target {
+  id: string; // 123@g.us or 92300…@c.us
+  name: string;
+  number?: string;
+}
+
+const targetCache = new Map<string, { at: number; list: Target[] }>();
+
+// Your WhatsApp groups or saved contacts, cached for 10 minutes (the group list takes a few seconds).
+export async function listTargets(a: AccountWithSecret, type: "groups" | "contacts", refresh = false): Promise<Target[]> {
+  const key = `${a.id}:${type}`;
+  const hit = targetCache.get(key);
+  if (!refresh && hit && Date.now() - hit.at < 10 * 60_000) return hit.list;
+  const out: Target[] = [];
+  for (let offset = 0; offset < 20_000; offset += 1000) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const page = await wa<any>(a, `/${type}?limit=1000&offset=${offset}`);
+    const list = Array.isArray(page) ? page : (page?.data ?? []);
+    for (const x of list) {
+      if (type === "groups") out.push({ id: String(x.id), name: String(x.name || x.subject || "Unnamed group") });
+      else if (String(x.id).endsWith("@c.us") && !x.isBlocked) out.push({ id: String(x.id), name: String(x.name || x.pushName || x.number || x.id), number: String(x.number ?? String(x.id).split("@")[0]) });
+    }
+    if (list.length < 1000 || type === "groups") break;
+  }
+  out.sort((x, y) => x.name.localeCompare(y.name));
+  targetCache.set(key, { at: Date.now(), list: out });
+  return out;
+}
+
+// Restart a session after the gateway restarted, or fetch the QR code when it needs linking again.
+export async function startSession(a: AccountWithSecret) {
+  try {
+    await wa(a, "/start", { method: "POST" });
+  } catch (e) {
+    if (!/already started/i.test(e instanceof Error ? e.message : "")) throw e;
+  }
+  return sessionStatus(a);
+}
+
+export async function sessionQr(a: AccountWithSecret) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const r = await wa<any>(a, "/qr");
+  return String(r?.qr ?? r?.qrCode ?? r?.data?.qr ?? r?.image ?? r?.base64 ?? "");
 }

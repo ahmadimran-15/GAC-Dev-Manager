@@ -14,7 +14,10 @@ function Login() {
     setBusy(true);
     setError("");
     const res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
-    if (res.ok) location.href = params.get("next") || "/";
+    if (res.ok) {
+      const d = await res.json().catch(() => ({}));
+      location.href = d.role === "team" ? "/portal" : params.get("next") || "/";
+    }
     else {
       setError((await res.json().catch(() => ({}))).error ?? "Sign in failed");
       setBusy(false);

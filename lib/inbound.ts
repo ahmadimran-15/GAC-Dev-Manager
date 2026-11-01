@@ -3,6 +3,7 @@ import { aiConfigured, suggestReply, transcribe, transcriptionConfigured } from 
 import { accountForSession, downloadMedia, parseIncoming, sendWhatsApp, waConfigured } from "@/lib/whatsapp";
 import { pollAll, sendEmail } from "@/lib/email";
 import { defaultSender, getAccount } from "@/lib/accounts";
+import { trackGroup, trackedGroups } from "@/lib/groups";
 import { addMessage, findOrCreateConversation, getConversation, getMessages, listConversations, updateConversation, updateMessage } from "@/lib/store";
 
 const log = (source: string, payload: unknown) => logEvent(source, payload).catch(() => {});
@@ -35,6 +36,21 @@ export async function handleWhatsApp(body: any) {
   // Which of our WhatsApp numbers this happened on
   const acc = await accountForSession(inc.sessionId);
   const account = acc?.id ?? "";
+
+  // Group chats: only the ones you've messaged (or added in Settings) come into the inbox
+  if (inc.isGroup) {
+    const groups = await trackedGroups();
+    if (!groups[inc.chatId]) return { ignored: "untracked group" };
+    const conv = await findOrCreateConversation({ channel: "whatsapp", externalId: inc.chatId, account, name: groups[inc.chatId] });
+    const text = inc.fromMe ? inc.text : `${inc.author ? `${inc.author}: ` : ""}${inc.text}`;
+    if (inc.fromMe) {
+      const recent = (await getMessages(conv.id)).slice(-3);
+      if (recent.some((m) => m.direction === "out" && m.text === inc.text && Math.abs(Number(m.created_at) - inc.at) < 120_000)) return { duplicate: true };
+    }
+    const id = await addMessage({ conv_id: conv.id, direction: inc.fromMe ? "out" : "in", kind: inc.kind, text: text || null, external_id: inc.id, sent_by: inc.fromMe ? "phone" : null, created_at: inc.at, via: acc?.label });
+    if (id && !inc.fromMe) afterIncoming(conv.id);
+    return { stored: id, group: true };
+  }
 
   if (inc.fromMe) {
     // You replied from your phone (or the dashboard's own send echoed back): record it once
@@ -89,6 +105,29 @@ export async function sendToConversation(convId: string, text: string, opts: { a
   await addMessage({ conv_id: convId, direction: "out", text, ack: opts.ack ? 1 : 0, sent_by: opts.by ?? "me", status: r.simulated ? "simulated" : "sent", external_id: r.id ?? null, via });
   await updateConversation(convId, { suggestion: null, suggestion_for: null, reminded_at: null });
   return { simulated: !!r.simulated, channel: c.channel, name: c.name, via };
+}
+
+// Send to anyone: a WhatsApp group or contact picked from your lists, or any email address.
+// The conversation is created (or reused) so replies land in the same thread.
+export async function sendToTarget(t: { channel: "whatsapp" | "email"; from: string; to: string; toName?: string; subject?: string; text: string; by?: string }) {
+  const sender = await getAccount(t.from);
+  if (!sender || sender.kind !== t.channel) throw new Error("Pick which account to send from");
+  let externalId: string;
+  let account: string;
+  if (t.channel === "whatsapp") {
+    // People are keyed by phone number, groups by group id (same as incoming messages)
+    externalId = t.to.endsWith("@g.us") ? t.to : t.to.split("@")[0].replace(/[^\d]/g, "");
+    account = sender.id;
+    if (t.to.endsWith("@g.us")) await trackGroup(t.to, t.toName || "WhatsApp group");
+  } else {
+    externalId = t.to.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(externalId)) throw new Error("That email address doesn't look right");
+    account = sender.address;
+  }
+  const conv = await findOrCreateConversation({ channel: t.channel, externalId, account, name: t.toName || externalId, subject: t.subject });
+  if (t.subject) await updateConversation(conv.id, { subject: t.subject });
+  const r = await sendToConversation(conv.id, t.text, { from: sender.id, by: t.by });
+  return { ...r, convId: conv.id };
 }
 
 // ---------- Background worker ----------
@@ -151,6 +190,11 @@ export function startWorker() {
   setTimeout(pollEmail, 5_000);
   setInterval(pollEmail, 60_000);
   setInterval(() => remindOnWhatsApp().catch((e) => log("reminder-error", String(e))), 60_000);
+
+  // Check every connection shortly after start, then every HEALTH_MINUTES (default 10)
+  const health = () => import("@/lib/health").then((h) => h.runHealth()).catch((e) => log("health-error", String(e)));
+  setTimeout(health, 20_000);
+  setInterval(health, Number(process.env.HEALTH_MINUTES ?? 10) * 60_000);
 
   // After a restart, draft replies for anyone still waiting without one
   setTimeout(async () => {

@@ -22,7 +22,7 @@ interface Driver {
 
 export const usingPostgres = () => !!(process.env.DATABASE_HOST && process.env.DATABASE_PASSWORD);
 
-const TABLES = ["conversations", "messages", "drafts", "events", "kv", "accounts"];
+const TABLES = ["conversations", "messages", "drafts", "events", "kv", "accounts", "users"];
 
 const schema = (pg: boolean) => {
   const big = pg ? "bigint" : "integer";
@@ -67,8 +67,20 @@ create table if not exists drafts (
   conv_id text,
   project text,
   author text not null,
+  author_id text,
   text text not null,
   status text not null default 'pending',
+  sent_to text,
+  created_at ${big} not null
+);
+create table if not exists users (
+  id text primary key,
+  email text not null unique,
+  name text not null,
+  role text not null default 'team',
+  password_hash text not null,
+  active integer not null default 1,
+  last_login ${big},
   created_at ${big} not null
 );
 create table if not exists events (
@@ -148,7 +160,13 @@ function connectSqlite(): Driver {
 }
 
 // Columns added after the first release (SQLite files created before them)
-const SQLITE_MIGRATIONS: [table: string, column: string, type: string][] = [["messages", "via", "text"]];
+const SQLITE_MIGRATIONS: [table: string, column: string, type: string][] = [
+  ["messages", "via", "text"],
+  ["drafts", "author_id", "text"],
+  ["drafts", "sent_to", "text"],
+];
+// Same for Postgres databases created before them
+const PG_MIGRATIONS = ["alter table drafts add column if not exists author_id text", "alter table drafts add column if not exists sent_to text"];
 
 const g = globalThis as unknown as { __gacDriver?: Promise<Driver>; __gacSeeded?: boolean };
 
@@ -157,6 +175,7 @@ function driver(): Promise<Driver> {
     g.__gacDriver = (async () => {
       fs.mkdirSync(MEDIA_DIR, { recursive: true });
       const d = usingPostgres() ? await connectPostgres() : connectSqlite();
+      if (d.kind === "postgres") for (const m of PG_MIGRATIONS) await d.exec(m).catch(() => {}); // before the schema: older tables need the columns first
       await d.exec(schema(d.kind === "postgres"));
       if (d.kind === "sqlite") {
         for (const [table, column, type] of SQLITE_MIGRATIONS) {

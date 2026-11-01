@@ -6,6 +6,8 @@ import { sttLabel, whisperConfigured } from "@/lib/stt";
 import { sessionStatus, waAccounts } from "@/lib/whatsapp";
 import { listAccounts, setAccountAddress, setAccountStatus } from "@/lib/accounts";
 import { clickupConfigured } from "@/lib/clickup";
+import { lastHealth } from "@/lib/health";
+import { currentUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -30,16 +32,20 @@ export async function GET() {
       waChecked = Date.now();
       refreshWhatsApp().catch(() => {});
     }
-    const [conversations, reply, drafts, accounts, lastWa, wa] = await Promise.all([
+    const [conversations, reply, drafts, accounts, lastWa, wa, health, me] = await Promise.all([
       listConversations(),
       firstReplyToday(),
       listDrafts(),
       listAccounts(),
       get<{ created_at: number }>("select created_at from events where source = 'whatsapp' order by id desc limit 1"),
       waAccounts(),
+      lastHealth(),
+      currentUser(),
     ]);
     return NextResponse.json({
       now: Date.now(),
+      me: me ? { name: me.name, email: me.email, role: me.role } : null,
+      health: health ? { at: health.at, problems: health.checks.filter((c) => c.ok === false).map((c) => `${c.name}: ${c.detail}`) } : null,
       conversations,
       drafts,
       accounts,
