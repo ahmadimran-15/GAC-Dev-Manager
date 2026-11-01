@@ -34,16 +34,23 @@ export function ReplyBox({
   const [lang, setLang] = useState("en-US");
   const latest = useRef(value);
   latest.current = value;
-  const voice = useVoice((t) => onChange(latest.current ? `${latest.current} ${t}` : t), !!state?.connections.voiceWhisper);
+  // While Generate runs, late speech must not be appended to the generated reply
+  const generating = useRef(false);
+  const voice = useVoice((t) => !generating.current && onChange(latest.current ? `${latest.current} ${t}` : t), !!state?.connections.voiceWhisper);
 
   async function generate() {
+    // Stop the mic first and include what was just being said
+    const input = voice.interim && voice.interim !== "Transcribing…" ? `${value} ${voice.interim}`.trim() : value;
+    generating.current = true;
+    if (voice.listening) voice.stop();
     setBusy(true);
     try {
-      onChange((await api<{ text: string }>(`/api/conversations/${convId}`, { action: "generate", input: value })).text);
+      onChange((await api<{ text: string }>(`/api/conversations/${convId}`, { action: "generate", input })).text);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Gemini failed", "error");
     } finally {
       setBusy(false);
+      generating.current = false;
     }
   }
 

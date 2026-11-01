@@ -1,5 +1,6 @@
 "use client";
 import { useEffect } from "react";
+import { ChevronDown } from "lucide-react";
 import { useLive, accountOf } from "@/components/Live";
 
 // Choose which mailbox / WhatsApp number a reply goes out from. Defaults to the one the client wrote to.
@@ -16,16 +17,17 @@ export default function FromPicker({ channel, account, value, onChange }: { chan
   if (!options.length) return <span className="text-[12px] text-[var(--amber)]">No {channel === "email" ? "mailbox" : "WhatsApp number"} set up for sending. Add one in Settings.</span>;
 
   return (
-    <label className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--muted)]">
-      From
-      <select className="max-w-[260px] rounded-md bg-transparent px-1 py-0.5 font-medium text-[var(--ink)] outline-none hover:bg-[var(--hover)]" value={value || fallback} onChange={(e) => onChange(e.target.value)}>
+    <label className="relative inline-flex h-8 cursor-pointer items-center rounded-lg border border-[var(--line-2)] bg-white pl-2.5 pr-7 text-[12.5px] hover:border-[#a8a8a2]" title="Which of your accounts the reply goes out from">
+      <span className="mr-1.5 text-[var(--muted)]">Send from</span>
+      <select className="max-w-[320px] cursor-pointer appearance-none truncate bg-transparent font-medium text-[var(--ink)] outline-none" value={value || fallback} onChange={(e) => onChange(e.target.value)}>
         {options.map((o) => (
           <option key={o.id} value={o.id}>
-            {o.kind === "email" ? (o.label && o.label !== o.address ? `${o.label} · ${o.address}` : o.address) : `${o.label}${o.address && o.address !== o.label && /^\d+$/.test(o.address) ? ` · +${o.address}` : ""}`}
-            {o.id === fallback ? " (client wrote here)" : ""}
+            {o.kind === "email" ? (o.label && o.label !== o.address ? `${o.label} · ${o.address}` : o.address) : /^\d+$/.test(o.address) ? `+${o.address}${o.label && !/^whatsapp$/i.test(o.label) ? ` (${o.label})` : ""}` : o.label}
+            {o.id === fallback && options.length > 1 ? " · default" : ""}
           </option>
         ))}
       </select>
+      <ChevronDown size={13} className="pointer-events-none absolute right-2 text-[var(--ink-2)]" />
     </label>
   );
 }

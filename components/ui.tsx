@@ -17,7 +17,7 @@ export function Channel({ c, account, withLabel = true }: { c: string; account?:
       {withLabel && (
         <>
           {ch.label}
-          {account ? <span className="text-[var(--muted)]"> · {account}</span> : null}
+          {account && account.toLowerCase() !== ch.label.toLowerCase() ? <span className="text-[var(--muted)]"> · {account}</span> : null}
         </>
       )}
     </span>

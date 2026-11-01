@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Check, CheckCheck, ListPlus, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
+import { Check, CheckCheck, ChevronDown, ChevronUp, ListPlus, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
 import Composer from "@/components/Composer";
 import type { ConvSummary, Message } from "@/lib/store";
 import { api, useLive, type DraftRow } from "@/components/Live";
@@ -21,6 +21,19 @@ interface Detail {
 }
 
 const REMIND = [null, 5, 15, 30, 60] as const;
+
+// A labelled dropdown that looks clickable: "Project: Ladeena ▾"
+function ChipSelect({ label, value, onChange, title, children }: { label: string; value: string; onChange: (v: string) => void; title?: string; children: React.ReactNode }) {
+  return (
+    <label title={title} className="relative inline-flex h-8 cursor-pointer items-center rounded-lg border border-[var(--line-2)] bg-white pl-2.5 pr-7 text-[12.5px] hover:border-[#a8a8a2]">
+      <span className="mr-1.5 text-[var(--muted)]">{label}</span>
+      <select className="max-w-[200px] cursor-pointer appearance-none truncate bg-transparent font-medium text-[var(--ink)] outline-none" value={value} onChange={(e) => onChange(e.target.value)}>
+        {children}
+      </select>
+      <ChevronDown size={13} className="pointer-events-none absolute right-2 text-[var(--ink-2)]" />
+    </label>
+  );
+}
 
 // WhatsApp ticks for our messages: ✓ sent, ✓✓ delivered, blue ✓✓ read, red ! failed
 function Ticks({ status }: { status: string | null }) {
@@ -52,6 +65,29 @@ function Inbox() {
   const [channel, setChannel] = useState("all");
   const [contextBusy, setContextBusy] = useState(false);
   const contextAsked = useRef<Set<string>>(new Set());
+  // Context box shown or hidden, remembered in this browser
+  const [showContext, setShowContext] = useState(true);
+  useEffect(() => {
+    try {
+      setShowContext(localStorage.getItem("gac_show_context") !== "0");
+    } catch {}
+  }, []);
+  const toggleContext = (v: boolean) => {
+    setShowContext(v);
+    try {
+      localStorage.setItem("gac_show_context", v ? "1" : "0");
+    } catch {}
+  };
+
+  // "WhatsApp · +92300…", "WhatsApp group", "Email · client@x.com → your mailbox" (the account only when you have several)
+  const channelLine = (x: ConvSummary) => {
+    const label = CHANNELS[x.channel]?.label ?? x.channel;
+    const mine = (state?.accounts ?? []).filter((a) => a.kind === x.channel);
+    const acc = accountOf(state?.accounts, x.account);
+    const via = mine.length > 1 && acc ? ` → ${x.channel === "email" ? acc.address : acc.label}` : "";
+    if (x.channel === "whatsapp") return x.externalId.endsWith("@g.us") ? `WhatsApp group${via}` : `${label}${/^\d+$/.test(x.externalId) ? ` · +${x.externalId}` : ""}${via}`;
+    return `${label}${x.externalId ? ` · ${x.externalId}` : ""}${via}`;
+  };
   const [q, setQ] = useState("");
   const [detail, setDetail] = useState<Detail | null>(null);
   const [reply, setReply] = useState("");
@@ -176,10 +212,10 @@ function Inbox() {
   // Write the context note when a chat is opened and the note is missing or older than the last message
   const stale = !!c && !!c.last && (!c.contextAt || c.contextAt < c.last.at);
   useEffect(() => {
-    if (!c || !stale || !state?.connections.gemini || contextAsked.current.has(c.id)) return;
+    if (!c || !stale || !showContext || !state?.connections.gemini || contextAsked.current.has(c.id)) return;
     contextAsked.current.add(c.id);
     summarize(c.id);
-  }, [c?.id, stale]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [c?.id, stale, showContext]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="mx-auto max-w-[1240px] px-6 py-6">
@@ -252,98 +288,114 @@ function Inbox() {
         {/* Thread */}
         {c ? (
           <div className="flex min-h-0 flex-col">
-            <div className="flex items-center gap-3 border-b border-[var(--line)] px-6 py-3.5">
-              <Avatar name={c.name} size={38} />
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-semibold">
-                  {c.name}
-                  {c.company && <span className="font-normal text-[var(--muted)]"> · {c.company}</span>}
-                </div>
-                <div className="mt-0.5 flex items-center gap-3">
-                  <Channel c={c.channel} account={accountOf(state?.accounts, c.account)?.label ?? (c.account || null)} />
-                  <select
-                    className="rounded-md bg-transparent text-[12.5px] text-[var(--ink-2)] outline-none hover:bg-[var(--hover)]"
-                    value={c.project ?? ""}
-                    onChange={(e) => action({ action: "project", project: e.target.value }, "Project saved")}
-                  >
-                    <option value="">No project</option>
-                    {[...new Set([...(board?.projects ?? []), c.project ?? ""])].filter(Boolean).map((p) => (
-                      <option key={p}>{p}</option>
-                    ))}
-                  </select>
-                  <select
-                    className="rounded-md bg-transparent text-[12.5px] text-[var(--ink-2)] outline-none hover:bg-[var(--hover)]"
-                    title="How long this client may wait before you're reminded"
-                    value={c.remindAfter ?? ""}
-                    onChange={(e) => action({ action: "remind_after", minutes: e.target.value === "" ? null : Number(e.target.value) }, "Reminder time saved")}
-                  >
-                    {[...new Set([...REMIND, c.remindAfter ?? null])].map((m) => (
-                      <option key={m ?? "d"} value={m ?? ""}>
-                        {m === null ? "Remind: default" : `Remind after ${m} min`}
-                      </option>
-                    ))}
-                  </select>
-                  {c.demo && <Pill>Test data</Pill>}
-                </div>
-                {!!detail.links?.length && (
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {detail.links.map((l) => {
-                      const status = board?.tasks?.find((t) => t.id === l.task_id)?.status;
-                      return (
-                        <a
-                          key={l.task_id}
-                          href={l.url ?? undefined}
-                          target="_blank"
-                          title={`Created ${ago(l.created_at, now)} from ${l.message_ids.length} message${l.message_ids.length === 1 ? "" : "s"}`}
-                          className="inline-flex max-w-[280px] items-center gap-1.5 rounded-full border border-[var(--line)] px-2 py-[1px] text-[12px] hover:bg-[var(--hover)]"
-                        >
-                          <ListPlus size={11} className="shrink-0 text-[var(--muted)]" />
-                          <span className="truncate">{l.title}</span>
-                          {status && <Pill tone={STATUS_TONE(status)}>{status}</Pill>}
-                        </a>
-                      );
-                    })}
+            <div className="space-y-2.5 border-b border-[var(--line)] px-6 py-3.5">
+              {/* Who + actions */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <Avatar name={c.name} size={38} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-semibold">
+                    {c.name}
+                    {c.company && <span className="font-normal text-[var(--muted)]"> · {c.company}</span>}
                   </div>
-                )}
+                  <div className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-[var(--ink-2)]">
+                    <Channel c={c.channel} withLabel={false} />
+                    {channelLine(c)}
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                  <button className={`btn btn-sm ${selecting ? "btn-dark" : ""}`} onClick={startTask}>
+                    <ListPlus size={14} /> {selecting ? `Create task from ${sel.size}` : "Create task"}
+                  </button>
+                  <button
+                    className="btn btn-sm"
+                    title={c.internal ? "Count this chat as a client again" : "Personal or team chat: never waiting, no reminders"}
+                    onClick={() => action({ action: "internal", value: !c.internal }, c.internal ? "Back to client chats" : "Marked as not a client")}
+                  >
+                    {c.internal ? "It's a client" : "Not a client"}
+                  </button>
+                  {c.status === "handled" ? (
+                    <button className="btn btn-sm" onClick={() => action({ action: "reopen" })}>
+                      Reopen
+                    </button>
+                  ) : (
+                    <button className="btn btn-sm" onClick={() => action({ action: "handled" }, "Marked as handled")}>
+                      <CheckCheck size={14} /> Handled
+                    </button>
+                  )}
+                </div>
               </div>
-              <button className={`btn btn-sm ${selecting ? "btn-dark" : ""}`} onClick={startTask}>
-                <ListPlus size={14} /> {selecting ? `Create task from ${sel.size}` : "Create task"}
-              </button>
-              <button
-                className="btn btn-sm btn-ghost"
-                title={c.internal ? "Count this chat as a client again" : "Personal or team chat: never waiting, no reminders"}
-                onClick={() => action({ action: "internal", value: !c.internal }, c.internal ? "Back to client chats" : "Marked as not a client")}
-              >
-                {c.internal ? "It's a client" : "Not a client"}
-              </button>
-              {c.status === "handled" ? (
-                <button className="btn btn-sm btn-ghost" onClick={() => action({ action: "reopen" })}>
-                  Reopen
-                </button>
-              ) : (
-                <button className="btn btn-sm btn-ghost" onClick={() => action({ action: "handled" }, "Marked as handled")}>
-                  <CheckCheck size={14} /> Handled
-                </button>
-              )}
+
+              {/* Settings for this client, as clear dropdowns */}
+              <div className="flex flex-wrap items-center gap-2">
+                <ChipSelect label="Project" value={c.project ?? ""} onChange={(v) => action({ action: "project", project: v }, "Project saved")}>
+                  <option value="">None</option>
+                  {[...new Set([...(board?.projects ?? []), c.project ?? ""])].filter(Boolean).map((p) => (
+                    <option key={p}>{p}</option>
+                  ))}
+                </ChipSelect>
+                <ChipSelect
+                  label="Remind after"
+                  title="How long this client may wait before you're reminded"
+                  value={String(c.remindAfter ?? "")}
+                  onChange={(v) => action({ action: "remind_after", minutes: v === "" ? null : Number(v) }, "Reminder time saved")}
+                >
+                  {[...new Set([...REMIND, c.remindAfter ?? null])].map((m) => (
+                    <option key={m ?? "d"} value={m ?? ""}>
+                      {m === null ? "Default" : `${m} min`}
+                    </option>
+                  ))}
+                </ChipSelect>
+                {c.repliedBy && <Pill tone="blue">Reply sent by {c.repliedBy.name} · {ago(c.repliedBy.at, now)}</Pill>}
+                {c.demo && <Pill>Test data</Pill>}
+                {detail.links?.map((l) => {
+                  const status = board?.tasks?.find((t) => t.id === l.task_id)?.status;
+                  return (
+                    <a
+                      key={l.task_id}
+                      href={l.url ?? undefined}
+                      target="_blank"
+                      title={`Task created ${ago(l.created_at, now)} from ${l.message_ids.length} message${l.message_ids.length === 1 ? "" : "s"}`}
+                      className="inline-flex h-8 max-w-[280px] items-center gap-1.5 rounded-lg border border-[var(--line-2)] bg-white px-2.5 text-[12.5px] hover:bg-[var(--hover)]"
+                    >
+                      <ListPlus size={12} className="shrink-0 text-[var(--muted)]" />
+                      <span className="truncate">{l.title}</span>
+                      {status && <Pill tone={STATUS_TONE(status)}>{status}</Pill>}
+                    </a>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* What's going on in this chat, written by Gemini */}
-            <div className="flex items-start gap-3 border-b border-[var(--line)] bg-[var(--bg)]/60 px-6 py-3">
-              <Sparkles size={14} className="mt-0.5 shrink-0 text-[var(--muted)]" />
-              <div className="min-w-0 flex-1">
-                <div className="mb-0.5 flex items-center gap-2 text-[11.5px] font-medium uppercase tracking-wide text-[var(--muted)]">
-                  Context
-                  {c.repliedBy && <Pill tone="blue">Reply sent by {c.repliedBy.name} · {ago(c.repliedBy.at, now)}</Pill>}
-                  {c.contextAt && <span className="normal-case tracking-normal">· {ago(c.contextAt, now)}</span>}
+            {/* What's going on in this chat, written by Gemini (can be hidden) */}
+            {showContext ? (
+              <div className="flex items-start gap-3 border-b border-[var(--line)] bg-[var(--bg)]/60 px-6 py-3">
+                <Sparkles size={14} className="mt-0.5 shrink-0 text-[var(--muted)]" />
+                <div className="min-w-0 flex-1">
+                  <div className="mb-0.5 flex items-center gap-2 text-[11.5px] font-medium uppercase tracking-wide text-[var(--muted)]">
+                    Context
+                    {c.contextAt && <span className="normal-case tracking-normal">· {ago(c.contextAt, now)}</span>}
+                  </div>
+                  <p className="max-h-[120px] overflow-y-auto whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--ink-2)]">
+                    {contextBusy && !c.context ? "Reading the conversation…" : (c.context ?? "No summary yet.")}
+                  </p>
                 </div>
-                <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--ink-2)]">
-                  {contextBusy && !c.context ? "Reading the conversation…" : (c.context ?? "No summary yet.")}
-                </p>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button className="btn btn-ghost btn-sm !px-2" title="Summarise again" disabled={contextBusy} onClick={() => summarize(c.id)}>
+                    <RotateCw size={13} className={contextBusy ? "animate-spin" : ""} />
+                  </button>
+                  <button className="btn btn-sm" onClick={() => toggleContext(false)}>
+                    <ChevronUp size={13} /> Hide
+                  </button>
+                </div>
               </div>
-              <button className="btn btn-ghost btn-sm !px-2" title="Summarise again" disabled={contextBusy} onClick={() => summarize(c.id)}>
-                <RotateCw size={13} className={contextBusy ? "animate-spin" : ""} />
+            ) : (
+              <button className="flex w-full items-center gap-2 border-b border-[var(--line)] bg-[var(--bg)]/60 px-6 py-1.5 text-left text-[12.5px] text-[var(--ink-2)] hover:bg-[var(--bg)]" onClick={() => toggleContext(true)}>
+                <Sparkles size={13} className="text-[var(--muted)]" /> Context hidden
+                <span className="ml-auto inline-flex items-center gap-1 font-medium text-[var(--ink)]">
+                  <ChevronDown size={13} /> Show
+                </span>
               </button>
-            </div>
+            )}
 
             {selecting && (
               <div className="flex items-center justify-between bg-[var(--bg)] px-6 py-2 text-[13px] text-[var(--ink-2)]">
