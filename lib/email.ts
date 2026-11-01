@@ -63,7 +63,7 @@ export async function pollAccount(acc: AccountWithSecret, onNew: (convId: string
     const kvKey = `imap_uid_${acc.id}`;
     const status = await client.status("INBOX", { uidNext: true });
     const next = Number((status && status.uidNext) || 1);
-    let last = Number(kvGet(kvKey) ?? 0);
+    let last = Number((await kvGet(kvKey)) ?? 0);
     if (!last) last = Math.max(0, next - 10); // first run: only the latest few emails
     if (next - 1 <= last) return 0;
     let count = 0;
@@ -75,11 +75,11 @@ export async function pollAccount(acc: AccountWithSecret, onNew: (convId: string
       if (!from?.address) continue;
       const sender = from.address.toLowerCase();
       // Skip our own outgoing copies, other company mailboxes and automated mail
-      if (accountsWithSecrets("email", false).some((a) => a.address.toLowerCase() === sender) || NOISE.test(sender) || mail.headers.has("list-unsubscribe")) continue;
-      const conv = findOrCreateConversation({ channel: "email", externalId: sender, account: acc.address, name: from.name || from.address, subject: mail.subject ?? undefined });
-      if (mail.subject) updateConversation(conv.id, { subject: mail.subject });
+      if ((await accountsWithSecrets("email", false)).some((a) => a.address.toLowerCase() === sender) || NOISE.test(sender) || mail.headers.has("list-unsubscribe")) continue;
+      const conv = await findOrCreateConversation({ channel: "email", externalId: sender, account: acc.address, name: from.name || from.address, subject: mail.subject ?? undefined });
+      if (mail.subject) await updateConversation(conv.id, { subject: mail.subject });
       const body = stripQuoted(mail.text ?? "").slice(0, 4000);
-      const id = addMessage({
+      const id = await addMessage({
         conv_id: conv.id,
         direction: "in",
         text: (mail.subject ? `${mail.subject}\n\n` : "") + body,
@@ -92,7 +92,7 @@ export async function pollAccount(acc: AccountWithSecret, onNew: (convId: string
         onNew(conv.id);
       }
     }
-    kvSet(kvKey, String(last));
+    await kvSet(kvKey, String(last));
     return count;
   } finally {
     lock.release();
@@ -101,18 +101,18 @@ export async function pollAccount(acc: AccountWithSecret, onNew: (convId: string
 }
 
 export async function pollAll(onNew: (convId: string) => void) {
-  for (const acc of emailAccounts()) {
+  for (const acc of await emailAccounts()) {
     try {
       await pollAccount(acc, onNew);
-      setAccountStatus(acc.id, true);
+      await setAccountStatus(acc.id, true);
     } catch (e) {
-      setAccountStatus(acc.id, false, (e as { responseText?: string }).responseText || (e instanceof Error ? e.message : String(e)));
+      await setAccountStatus(acc.id, false, (e as { responseText?: string }).responseText || (e instanceof Error ? e.message : String(e)));
     }
   }
 }
 
 export async function sendEmail(fromAccountId: string, to: string, subject: string | null, text: string) {
-  const acc = getAccount(fromAccountId);
+  const acc = await getAccount(fromAccountId);
   if (!acc) return { ok: false, error: "That mailbox no longer exists" };
   try {
     const info = await smtpTransport(acc).sendMail({

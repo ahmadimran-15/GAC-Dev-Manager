@@ -94,35 +94,35 @@ const DRAFTS: [conv: string, author: string, text: string, minsAgo: number][] = 
   ["Lisa Brown", "Hamza Khan", "hi lisa the reply sync is fixed, the replies from yesterday are also synced now in crm", 22],
 ];
 
-export function seedDemo() {
-  if (kvGet("demo_seeded") || get("select 1 from conversations limit 1")) return;
+export async function seedDemo() {
+  if ((await kvGet("demo_seeded")) || (await get("select 1 from conversations limit 1"))) return;
+  await run("insert into kv (k, v) values ('demo_seeded', '1') on conflict (k) do nothing");
   const now = Date.now();
   const ids: Record<string, string> = {};
   for (const c of CONVS) {
     const id = uid("c_");
     ids[c.name] = id;
     const lastIn = [...c.msgs].reverse().find((m) => m[0] === "in");
-    run(
+    await run(
       "insert into conversations (id, channel, external_id, account, name, company, project, suggestion, suggestion_for, demo, created_at) values (?,?,?,?,?,?,?,?,?,1,?)",
       id, c.channel, c.ext, c.account ?? "", c.name, c.company, c.project, c.suggestion ?? null, c.suggestion && lastIn ? "latest" : null, now - 3000 * MIN,
     );
     for (const [dir, text, ago, extra] of c.msgs) {
-      run(
+      await run(
         "insert into messages (id, conv_id, direction, kind, text, transcript, ack, sent_by, status, created_at) values (?,?,?,?,?,?,?,?,?,?)",
         uid("m_"), id, dir, extra?.voice ? "voice" : "text", extra?.voice ? null : text, extra?.voice ? text : null, extra?.ack ? 1 : 0, dir === "out" ? "me" : null, "demo", now - ago * MIN,
       );
     }
   }
   for (const [conv, author, text, ago] of DRAFTS) {
-    run("insert into drafts (id, conv_id, author, text, created_at) values (?,?,?,?,?)", uid("d_"), ids[conv], author, text, now - ago * MIN);
+    await run("insert into drafts (id, conv_id, author, text, created_at) values (?,?,?,?,?)", uid("d_"), ids[conv], author, text, now - ago * MIN);
   }
-  run("insert into kv (k, v) values ('demo_seeded', '1') on conflict (k) do nothing");
 }
 
-export function clearDemo() {
-  run("delete from messages where conv_id in (select id from conversations where demo = 1)");
-  run("delete from drafts where conv_id in (select id from conversations where demo = 1)");
-  run("delete from conversations where demo = 1");
+export async function clearDemo() {
+  await run("delete from messages where conv_id in (select id from conversations where demo = 1)");
+  await run("delete from drafts where conv_id in (select id from conversations where demo = 1)");
+  await run("delete from conversations where demo = 1");
 }
 
 // ---------- Team & tasks shown until ClickUp is connected ----------

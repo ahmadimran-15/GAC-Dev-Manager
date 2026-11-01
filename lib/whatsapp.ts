@@ -21,13 +21,13 @@ async function wa<T>(a: AccountWithSecret, p: string, init?: RequestInit): Promi
 }
 
 export const waAccounts = () => accountsWithSecrets("whatsapp");
-export const waConfigured = () => waAccounts().length > 0;
-const pick = (id?: string | null) => (id ? getAccount(id) : null) ?? waAccounts().find((a) => a.canSend) ?? null;
+export const waConfigured = async () => (await waAccounts()).length > 0;
+const pick = async (id?: string | null) => (id ? await getAccount(id) : null) ?? (await waAccounts()).find((a) => a.canSend) ?? null;
 
 const chatIdFor = (to: string) => (to.includes("@") ? to : `${to.replace(/[^\d]/g, "")}@c.us`);
 
 export async function sendWhatsApp(to: string, text: string, accountId?: string | null): Promise<{ ok: boolean; simulated?: boolean; id?: string; error?: string }> {
-  const a = pick(accountId);
+  const a = await pick(accountId);
   if (!a) return { ok: true, simulated: true };
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -115,11 +115,14 @@ export function parseIncoming(body: any): Incoming | null {
   };
 }
 
-export const accountForSession = (sessionId: string | null) => waAccounts().find((a) => a.config.sessionId === sessionId) ?? waAccounts()[0] ?? null;
+export const accountForSession = async (sessionId: string | null) => {
+  const list = await waAccounts();
+  return list.find((a) => a.config.sessionId === sessionId) ?? list[0] ?? null;
+};
 
 // Voice notes: the gateway stores the media; fetch the bytes and keep a local copy for playback.
 export async function downloadMedia(inc: Incoming): Promise<{ file: string; mime: string; buf: Buffer } | null> {
-  const a = accountForSession(inc.sessionId);
+  const a = await accountForSession(inc.sessionId);
   if (!a) return null;
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = await fetch(`${base(a)}/api/sessions/${a.config.sessionId}/messages/${encodeURIComponent(inc.chatId)}/${encodeURIComponent(inc.id)}/media`, {

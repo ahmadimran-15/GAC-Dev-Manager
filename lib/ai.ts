@@ -42,8 +42,8 @@ export async function rewrite(text: string, instructions: string) {
   return strip(await chat(`Rewrite this client message following the manager's instruction (it may be in English, Urdu or Hindi). Keep it short and professional, in English. Return only the final message.\n\nMessage:\n${text}\n\nInstruction:\n${instructions}`, "rewrite"));
 }
 
-function transcriptFor(convId: string, limit = 12) {
-  return getMessages(convId)
+async function transcriptFor(convId: string, limit = 12) {
+  return (await getMessages(convId))
     .slice(-limit)
     .map((m) => `${m.direction === "in" ? "Client" : "Us"}: ${msgText(m)}`)
     .join("\n");
@@ -51,20 +51,20 @@ function transcriptFor(convId: string, limit = 12) {
 
 // Draft the reply the manager would most likely send now, and store it on the conversation.
 export async function suggestReply(convId: string) {
-  const c = getConversation(convId);
+  const c = await getConversation(convId);
   if (!c) return null;
-  const msgs = getMessages(convId);
+  const msgs = await getMessages(convId);
   const lastIn = [...msgs].reverse().find((m) => m.direction === "in");
   const text = strip(
     await chat(
       `You are the project manager of a software agency replying to a client${c.project ? ` about the "${c.project}" project` : ""}. ` +
         `Write the next reply to the client's latest messages. Be short (1–3 sentences), warm and professional, in English. ` +
         `You don't know technical details, so acknowledge, say the team is on it and promise a concrete update time when it fits. ` +
-        `Address them by first name. Return only the reply text.\n\nConversation:\n${transcriptFor(convId)}`,
+        `Address them by first name. Return only the reply text.\n\nConversation:\n${await transcriptFor(convId)}`,
       `suggest-${convId}`,
     ),
   );
-  updateConversation(convId, { suggestion: text, suggestion_for: lastIn?.id ?? null });
+  await updateConversation(convId, { suggestion: text, suggestion_for: lastIn?.id ?? null });
   return text;
 }
 

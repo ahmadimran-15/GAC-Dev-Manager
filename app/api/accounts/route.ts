@@ -6,7 +6,7 @@ import { listSessions, registerWebhook, sessionStatus } from "@/lib/whatsapp";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ accounts: listAccounts(), presets: EMAIL_PRESETS });
+  return NextResponse.json({ accounts: await listAccounts(), presets: EMAIL_PRESETS });
 }
 
 const mailCfg = (b: Record<string, string>) => {
@@ -34,8 +34,8 @@ export async function POST(req: Request) {
         const cfg = mailCfg(b);
         const test = await testMailbox({ address: b.address.trim(), secret: b.password, config: cfg });
         if (!test.imap.startsWith("OK") && !b.force) return NextResponse.json({ error: `Couldn't sign in. Reading: ${test.imap}. Sending: ${test.smtp}`, test }, { status: 400 });
-        const id = addAccount({ kind: "email", label: b.label || b.address.trim(), address: b.address.trim(), provider: b.provider || "custom", config: cfg, secret: b.password, canSend: b.canSend !== false });
-        setAccountStatus(id, test.imap.startsWith("OK"), test.ok ? undefined : `Sending: ${test.smtp}`);
+        const id = await addAccount({ kind: "email", label: b.label || b.address.trim(), address: b.address.trim(), provider: b.provider || "custom", config: cfg, secret: b.password, canSend: b.canSend !== false });
+        await setAccountStatus(id, test.imap.startsWith("OK"), test.ok ? undefined : `Sending: ${test.smtp}`);
         return NextResponse.json({ ok: true, id, test });
       }
       case "wa-sessions": {
@@ -44,22 +44,22 @@ export async function POST(req: Request) {
       }
       case "add-whatsapp": {
         if (!b.baseUrl || !b.apiKey || !b.sessionId) return NextResponse.json({ error: "Pick a session first" }, { status: 400 });
-        const id = addAccount({ kind: "whatsapp", label: b.label || b.phone || "WhatsApp", address: b.phone || b.sessionId, provider: "chatslash", config: { baseUrl: b.baseUrl.trim(), sessionId: b.sessionId }, secret: b.apiKey.trim(), canSend: b.canSend !== false });
-        const acc = getAccount(id)!;
+        const id = await addAccount({ kind: "whatsapp", label: b.label || b.phone || "WhatsApp", address: b.phone || b.sessionId, provider: "chatslash", config: { baseUrl: b.baseUrl.trim(), sessionId: b.sessionId }, secret: b.apiKey.trim(), canSend: b.canSend !== false });
+        const acc = (await getAccount(id))!;
         const st = await sessionStatus(acc);
-        setAccountStatus(id, st.status === "ready", st.status === "ready" ? undefined : `Session ${st.status}`);
+        await setAccountStatus(id, st.status === "ready", st.status === "ready" ? undefined : `Session ${st.status}`);
         return NextResponse.json({ ok: true, id });
       }
       case "update":
-        updateAccount(b.id, { label: b.label, enabled: b.enabled, canSend: b.canSend });
+        await updateAccount(b.id, { label: b.label, enabled: b.enabled, canSend: b.canSend });
         return NextResponse.json({ ok: true });
       case "delete":
-        deleteAccount(b.id);
+        await deleteAccount(b.id);
         return NextResponse.json({ ok: true });
       case "register-webhook": {
         const base = String(process.env.PUBLIC_URL || b.publicUrl || "").replace(/\/$/, "");
         if (!base.startsWith("https://")) return NextResponse.json({ error: "Needs a public https address. Set PUBLIC_URL in .env first (tunnel or hosting)." }, { status: 400 });
-        const targets = b.id ? [getAccount(b.id)] : listAccounts("whatsapp").map((a) => getAccount(a.id));
+        const targets = b.id ? [await getAccount(b.id)] : await Promise.all((await listAccounts("whatsapp")).map((a) => getAccount(a.id)));
         for (const a of targets) if (a) await registerWebhook(a, `${base}/api/webhooks/whatsapp`);
         return NextResponse.json({ ok: true, url: `${base}/api/webhooks/whatsapp`, count: targets.length });
       }

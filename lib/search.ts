@@ -23,7 +23,7 @@ export async function searchClickUp(query: string) {
 export async function searchEmail(query: string) {
   const words = query.split(/\s+/).filter((w) => w.length > 2).slice(0, 4);
   const out: string[] = [];
-  for (const acc of emailAccounts()) {
+  for (const acc of await emailAccounts()) {
     const client = new ImapFlow({ host: acc.config.imapHost!, port: acc.config.imapPort ?? 993, secure: (acc.config.imapPort ?? 993) === 993, auth: { user: acc.config.username || acc.address, pass: acc.secret }, logger: false });
     try {
       await client.connect();
@@ -47,13 +47,13 @@ export async function searchEmail(query: string) {
       await client.logout().catch(() => {});
     }
   }
-  return out.length ? out.join("\n\n") : emailAccounts().length ? "No matching emails." : "No email accounts are connected yet.";
+  return out.length ? out.join("\n\n") : (await emailAccounts()).length ? "No matching emails." : "No email accounts are connected yet.";
 }
 
-export function searchMessages(query: string) {
+export async function searchMessages(query: string) {
   const words = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2).slice(0, 5);
   if (!words.length) return "No search words.";
-  const rows = all<{ name: string; channel: string; direction: string; text: string | null; transcript: string | null; created_at: number }>(
+  const rows = await all<{ name: string; channel: string; direction: string; text: string | null; transcript: string | null; created_at: number }>(
     `select c.name, c.channel, m.direction, m.text, m.transcript, m.created_at from messages m join conversations c on c.id = m.conv_id
      where ${words.map(() => "lower(coalesce(m.text,'') || ' ' || coalesce(m.transcript,'') || ' ' || c.name) like ?").join(" and ")}
      order by m.created_at desc limit 12`,

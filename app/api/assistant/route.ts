@@ -9,20 +9,20 @@ export async function POST(req: Request) {
   const { text, history } = await req.json().catch(() => ({}));
   if (!String(text ?? "").trim()) return NextResponse.json({ error: "Say or type something first" }, { status: 400 });
   const now = Date.now();
-  const convs = listConversations().slice(0, 25);
+  const convs = (await listConversations()).slice(0, 25);
   const b = await board();
   const members = await allMembers().catch(() => b.team);
   const byStage = new Map<string, string[]>();
   for (const p of b.projectInfo) byStage.set(p.stage, [...(byStage.get(p.stage) ?? []), `${p.name}${p.owner ? ` (${p.owner})` : ""}`]);
   const context = [
     "Conversations (most urgent first):",
-    ...convs.map((c) => {
-      const recent = getMessages(c.id)
+    ...(await Promise.all(convs.map(async (c) => {
+      const recent = (await getMessages(c.id))
         .slice(-4)
         .map((m) => `${m.direction === "in" ? "client" : "us"}: ${msgText(m).slice(0, 160)}`)
         .join(" | ");
       return `- id=${c.id} name="${c.name}" channel=${c.channel} project="${c.project ?? ""}" ${c.waiting ? `WAITING ${Math.round((now - (c.waitingSince ?? now)) / 60000)}m` : "answered"} :: ${recent}`;
-    }),
+    }))),
     `Team members: ${members.join(", ")}`,
     `CURRENT projects (new tasks go here): ${b.projects.join(", ")}`,
     ...[...byStage.entries()].filter(([stage]) => !b.projectInfo.find((p) => p.stage === stage)?.current).map(([stage, list]) => `${stage}: ${list.join(", ")}`),
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
     const cmd = await interpret(String(text), context, Array.isArray(history) ? history.slice(-6).join("\n") : "");
     if (cmd.intent === "search" && cmd.query) {
       const source = cmd.source ?? "clickup";
-      const results = source === "email" ? await searchEmail(cmd.query) : source === "messages" ? searchMessages(cmd.query) : await searchClickUp(cmd.query);
+      const results = source === "email" ? await searchEmail(cmd.query) : source === "messages" ? await searchMessages(cmd.query) : await searchClickUp(cmd.query);
       return NextResponse.json({ intent: "answer", answer: await answerFrom(String(text), source, results), searched: { source, query: cmd.query } });
     }
     let warning: string | null = null;

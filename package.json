@@ -15,6 +15,7 @@
     "mailparser": "^3.14.1",
     "next": "^15.5.28",
     "nodemailer": "^10.3.1",
+    "postgres": "^4.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

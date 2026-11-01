@@ -5,6 +5,6 @@ import { logEvent } from "@/lib/db";
 // tamper-proof time log (In Progress / In Revision = clock running).
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
-  if (body) logEvent("clickup", { ...body, received_at: Date.now() });
+  if (body) await logEvent("clickup", { ...body, received_at: Date.now() });
   return NextResponse.json({ ok: true });
 }
