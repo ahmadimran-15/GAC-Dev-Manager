@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { AtSign, Loader2, MessageCircle, Plus, Trash2, X } from "lucide-react";
+import { AtSign, Loader2, MessageCircle, Pencil, Plus, Trash2, X } from "lucide-react";
 import { api, useLive, type AccountLite } from "@/components/Live";
 import { ago } from "@/components/ui";
 
@@ -26,8 +26,9 @@ function StatusLine({ a }: { a: AccountLite }) {
   );
 }
 
-function Row({ a, onChange }: { a: AccountLite; onChange: () => void }) {
+function Row({ a, onChange, presets }: { a: AccountLite; onChange: () => void; presets: Record<string, Preset> }) {
   const { toast } = useLive();
+  const [editing, setEditing] = useState(false);
   const set = async (body: Record<string, unknown>, msg?: string) => {
     try {
       await api("/api/accounts", { id: a.id, ...body });
@@ -38,6 +39,7 @@ function Row({ a, onChange }: { a: AccountLite; onChange: () => void }) {
     }
   };
   return (
+    <div>
     <div className="flex items-center gap-3 py-3">
       <span className="dot" style={{ background: !a.enabled ? "#cfcfca" : a.status?.ok ? "var(--green)" : a.status ? "var(--red)" : "#cfcfca" }} />
       <div className="min-w-0 flex-1">
@@ -57,6 +59,9 @@ function Row({ a, onChange }: { a: AccountLite; onChange: () => void }) {
         <input type="checkbox" className="accent-[#171717]" checked={a.enabled} onChange={(e) => set({ action: "update", enabled: e.target.checked })} />
         Active
       </label>
+      <button className={`btn btn-sm ${editing ? "btn-dark" : ""}`} onClick={() => setEditing((e) => !e)}>
+        {editing ? <X size={13} /> : <Pencil size={13} />} {editing ? "Close" : "Edit"}
+      </button>
       <button
         className="btn btn-ghost btn-sm !px-2"
         title="Remove"
@@ -65,26 +70,88 @@ function Row({ a, onChange }: { a: AccountLite; onChange: () => void }) {
         <Trash2 size={14} />
       </button>
     </div>
+      {editing &&
+        (a.kind === "email" ? (
+          <AddMailbox presets={presets} edit={a} onDone={() => (setEditing(false), onChange())} />
+        ) : (
+          <EditWhatsApp a={a} onDone={() => (setEditing(false), onChange())} />
+        ))}
+    </div>
   );
 }
 
-function AddMailbox({ presets, onDone }: { presets: Record<string, Preset>; onDone: () => void }) {
+// Rename a WhatsApp number, or point it at a new gateway URL / API key (empty = keep the saved one)
+function EditWhatsApp({ a, onDone }: { a: AccountLite; onDone: () => void }) {
   const { toast } = useLive();
-  const [f, setF] = useState({ provider: "titan", address: "", password: "", label: "", imapHost: "", imapPort: "", smtpHost: "", smtpPort: "" });
+  const [f, setF] = useState({ label: a.label, baseUrl: "", apiKey: "" });
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="fade-in mb-3 rounded-xl bg-[var(--bg)] p-4">
+      <div className="grid grid-cols-3 gap-2.5">
+        <label className="block">
+          <span className="eyebrow">Name</span>
+          <input className="input mt-1" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
+        </label>
+        <label className="block">
+          <span className="eyebrow">Gateway URL</span>
+          <input className="input mt-1" placeholder="Keep current" value={f.baseUrl} onChange={(e) => setF({ ...f, baseUrl: e.target.value })} />
+        </label>
+        <label className="block">
+          <span className="eyebrow">API key</span>
+          <input className="input mt-1" type="password" autoComplete="new-password" placeholder="Keep current" value={f.apiKey} onChange={(e) => setF({ ...f, apiKey: e.target.value })} />
+        </label>
+      </div>
+      <div className="mt-3 flex justify-end">
+        <button
+          className="btn btn-dark btn-sm"
+          disabled={busy || !f.label.trim()}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const r = await api<{ status: string }>("/api/accounts", { action: "edit-whatsapp", id: a.id, ...f });
+              toast(r.status === "ready" ? "Saved · connected" : `Saved · session ${r.status}`, r.status === "ready" ? "ok" : "error");
+              onDone();
+            } catch (e) {
+              toast(e instanceof Error ? e.message : "Failed", "error");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy && <Loader2 size={13} className="animate-spin" />} Save changes
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Add a mailbox, or with `edit` change one in place (empty password = keep the saved one)
+function AddMailbox({ presets, onDone, edit }: { presets: Record<string, Preset>; onDone: () => void; edit?: AccountLite }) {
+  const { toast } = useLive();
+  const [f, setF] = useState({
+    provider: edit?.provider ?? "titan",
+    address: edit?.address ?? "",
+    password: "",
+    label: edit && edit.label !== edit.address ? edit.label : "",
+    imapHost: "",
+    imapPort: "",
+    smtpHost: "",
+    smtpPort: "",
+  });
   const [busy, setBusy] = useState<"" | "test" | "save">("");
   const [result, setResult] = useState<{ imap: string; smtp: string } | null>(null);
   const p = presets[f.provider];
   const up = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
 
-  async function go(action: "test-email" | "add-email") {
+  async function go(action: "test-email" | "add-email" | "edit-email") {
     setBusy(action === "test-email" ? "test" : "save");
     setResult(null);
     try {
-      const r = await api<{ imap?: string; smtp?: string; test?: { imap: string; smtp: string } }>("/api/accounts", { action, ...f });
+      const r = await api<{ imap?: string; smtp?: string; test?: { imap: string; smtp: string } }>("/api/accounts", { action, ...f, ...(edit ? { id: edit.id } : {}) });
       const t = r.test ?? (r.imap ? { imap: r.imap, smtp: r.smtp ?? "" } : null);
       setResult(t);
-      if (action === "add-email") {
-        toast(`${f.address} added`);
+      if (action !== "test-email") {
+        toast(edit ? `${f.address} saved · signed in` : `${f.address} added`);
         onDone();
       }
     } catch (e) {
@@ -117,7 +184,7 @@ function AddMailbox({ presets, onDone }: { presets: Record<string, Preset>; onDo
         </label>
         <label className="block">
           <span className="eyebrow">{f.provider === "gmail" || f.provider === "yahoo" ? "App password" : "Password"}</span>
-          <input className="input mt-1" type="password" autoComplete="new-password" value={f.password} onChange={up("password")} />
+          <input className="input mt-1" type="password" autoComplete="new-password" placeholder={edit ? "Leave empty to keep the saved one" : ""} value={f.password} onChange={up("password")} />
         </label>
         {f.provider === "custom" && (
           <>
@@ -136,11 +203,11 @@ function AddMailbox({ presets, onDone }: { presets: Record<string, Preset>; onDo
         </div>
       )}
       <div className="mt-3 flex justify-end gap-2">
-        <button className="btn btn-sm" disabled={!!busy || !f.address || !f.password} onClick={() => go("test-email")}>
+        <button className="btn btn-sm" disabled={!!busy || !f.address || !f.password} onClick={() => go("test-email")} title={edit && !f.password ? "Type the password to test it, or press Save changes (it tests the saved one)" : undefined}>
           {busy === "test" && <Loader2 size={13} className="animate-spin" />} Test connection
         </button>
-        <button className="btn btn-dark btn-sm" disabled={!!busy || !f.address || !f.password} onClick={() => go("add-email")}>
-          {busy === "save" && <Loader2 size={13} className="animate-spin" />} Save mailbox
+        <button className="btn btn-dark btn-sm" disabled={!!busy || !f.address || (!edit && !f.password)} onClick={() => go(edit ? "edit-email" : "add-email")}>
+          {busy === "save" && <Loader2 size={13} className="animate-spin" />} {edit ? "Save changes" : "Save mailbox"}
         </button>
       </div>
     </div>
@@ -250,7 +317,7 @@ export default function AccountsManager() {
       {adding === "email" && <AddMailbox presets={presets} onDone={done} />}
       <div className="divide-y divide-[var(--line)]">
         {emails.map((a) => (
-          <Row key={a.id} a={a} onChange={refresh} />
+          <Row key={a.id} a={a} onChange={refresh} presets={presets} />
         ))}
         {!emails.length && adding !== "email" && <p className="py-3 text-[13px] text-[var(--muted)]">No mailboxes yet. Add yours, info@, dev@ and each teammate&apos;s inbox.</p>}
       </div>
@@ -285,7 +352,7 @@ export default function AccountsManager() {
       {adding === "whatsapp" && <AddWhatsApp defaultUrl={was.length ? "https://ahmad-wasender.duckdns.org" : ""} onDone={done} />}
       <div className="divide-y divide-[var(--line)] pb-2">
         {was.map((a) => (
-          <Row key={a.id} a={a} onChange={refresh} />
+          <Row key={a.id} a={a} onChange={refresh} presets={presets} />
         ))}
         {!was.length && adding !== "whatsapp" && <p className="py-3 text-[13px] text-[var(--muted)]">No WhatsApp numbers yet.</p>}
       </div>

@@ -53,6 +53,39 @@ export async function POST(req: Request) {
       case "update":
         await updateAccount(b.id, { label: b.label, enabled: b.enabled, canSend: b.canSend });
         return NextResponse.json({ ok: true });
+      case "edit-email": {
+        // Change a mailbox in place; an empty password keeps the saved one. Saved only if it can sign in (or force).
+        const cur = await getAccount(b.id);
+        if (!cur || cur.kind !== "email") return NextResponse.json({ error: "Mailbox not found" }, { status: 404 });
+        const address = String(b.address || cur.address).trim();
+        const secret = b.password || cur.secret;
+        // Same provider: keep its saved server settings unless new ones were typed (custom mailboxes)
+        const provider = b.provider || cur.provider;
+        const same = provider === cur.provider;
+        const keep = (v: unknown, old: unknown) => String(v || (same && old ? old : ""));
+        const cfg = mailCfg({
+          provider,
+          address,
+          imapHost: keep(b.imapHost, cur.config.imapHost),
+          imapPort: keep(b.imapPort, cur.config.imapPort),
+          smtpHost: keep(b.smtpHost, cur.config.smtpHost),
+          smtpPort: keep(b.smtpPort, cur.config.smtpPort),
+          username: keep(b.username, address === cur.address ? cur.config.username : ""),
+        });
+        const test = await testMailbox({ address, secret, config: cfg });
+        if (!test.imap.startsWith("OK") && !b.force) return NextResponse.json({ error: `Couldn't sign in. Reading: ${test.imap}. Sending: ${test.smtp}`, test }, { status: 400 });
+        await updateAccount(cur.id, { label: b.label || address, address, provider, config: cfg, secret: b.password || undefined, enabled: true });
+        await setAccountStatus(cur.id, test.imap.startsWith("OK"), test.ok ? undefined : `Sending: ${test.smtp}`);
+        return NextResponse.json({ ok: true, test });
+      }
+      case "edit-whatsapp": {
+        const cur = await getAccount(b.id);
+        if (!cur || cur.kind !== "whatsapp") return NextResponse.json({ error: "WhatsApp number not found" }, { status: 404 });
+        await updateAccount(cur.id, { label: b.label || cur.label, config: { ...cur.config, baseUrl: String(b.baseUrl || cur.config.baseUrl).trim() }, secret: b.apiKey ? String(b.apiKey).trim() : undefined });
+        const st = await sessionStatus((await getAccount(cur.id))!);
+        await setAccountStatus(cur.id, st.status === "ready", st.status === "ready" ? undefined : `Session ${st.status}`);
+        return NextResponse.json({ ok: true, status: st.status });
+      }
       case "delete":
         await deleteAccount(b.id);
         return NextResponse.json({ ok: true });

@@ -338,15 +338,21 @@ export async function listTargets(a: AccountWithSecret, type: "groups" | "contac
   const hit = targetCache.get(key);
   if (!refresh && hit && Date.now() - hit.at < 10 * 60_000) return hit.list;
   const out: Target[] = [];
+  // The gateway's /groups call can take over 30 s; the chat list has the same groups and answers in a second
+  if (type === "groups") {
+    for (const c of await listChats(a)) if (c.isGroup) out.push({ id: c.id, name: c.name || "Unnamed group" });
+    out.sort((x, y) => x.name.localeCompare(y.name));
+    targetCache.set(key, { at: Date.now(), list: out });
+    return out;
+  }
   for (let offset = 0; offset < 20_000; offset += 1000) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const page = await wa<any>(a, `/${type}?limit=1000&offset=${offset}`);
     const list = Array.isArray(page) ? page : (page?.data ?? []);
     for (const x of list) {
-      if (type === "groups") out.push({ id: String(x.id), name: String(x.name || x.subject || "Unnamed group") });
-      else if (String(x.id).endsWith("@c.us") && !x.isBlocked) out.push({ id: String(x.id), name: String(x.name || x.pushName || x.number || x.id), number: String(x.number ?? String(x.id).split("@")[0]) });
+      if (String(x.id).endsWith("@c.us") && !x.isBlocked) out.push({ id: String(x.id), name: String(x.name || x.pushName || x.number || x.id), number: String(x.number ?? String(x.id).split("@")[0]) });
     }
-    if (list.length < 1000 || type === "groups") break;
+    if (list.length < 1000) break;
   }
   out.sort((x, y) => x.name.localeCompare(y.name));
   targetCache.set(key, { at: Date.now(), list: out });

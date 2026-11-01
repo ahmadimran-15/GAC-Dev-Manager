@@ -11,6 +11,7 @@ import TaskDrawer, { type BoardLite } from "@/components/TaskDrawer";
 import { ReplyBox, ackText } from "@/components/WaitingCard";
 import { ListSkeleton, ThreadSkeleton } from "@/components/Skeleton";
 import FromPicker from "@/components/FromPicker";
+import Dropdown from "@/components/Dropdown";
 import { accountOf } from "@/components/Live";
 
 interface Detail {
@@ -22,18 +23,6 @@ interface Detail {
 
 const REMIND = [null, 5, 15, 30, 60] as const;
 
-// A labelled dropdown that looks clickable: "Project: Ladeena ▾"
-function ChipSelect({ label, value, onChange, title, children }: { label: string; value: string; onChange: (v: string) => void; title?: string; children: React.ReactNode }) {
-  return (
-    <label title={title} className="relative inline-flex h-8 cursor-pointer items-center rounded-lg border border-[var(--line-2)] bg-white pl-2.5 pr-7 text-[12.5px] hover:border-[#a8a8a2]">
-      <span className="mr-1.5 text-[var(--muted)]">{label}</span>
-      <select className="max-w-[200px] cursor-pointer appearance-none truncate bg-transparent font-medium text-[var(--ink)] outline-none" value={value} onChange={(e) => onChange(e.target.value)}>
-        {children}
-      </select>
-      <ChevronDown size={13} className="pointer-events-none absolute right-2 text-[var(--ink-2)]" />
-    </label>
-  );
-}
 
 // WhatsApp ticks for our messages: ✓ sent, ✓✓ delivered, blue ✓✓ read, red ! failed
 function Ticks({ status }: { status: string | null }) {
@@ -65,6 +54,15 @@ function Inbox() {
   const [channel, setChannel] = useState("all");
   const [contextBusy, setContextBusy] = useState(false);
   const contextAsked = useRef<Set<string>>(new Set());
+  // Which chats you've opened since their last client message (remembered in this browser)
+  const [seen, setSeen] = useState<Record<string, number>>({});
+  useEffect(() => {
+    try {
+      setSeen(JSON.parse(localStorage.getItem("gac_seen") ?? "{}"));
+    } catch {}
+  }, []);
+  const isUnread = (x: ConvSummary) => !!x.last && x.last.direction === "in" && (seen[x.id] ?? 0) < x.last.at;
+
   // Context box shown or hidden, remembered in this browser
   const [showContext, setShowContext] = useState(true);
   useEffect(() => {
@@ -111,6 +109,17 @@ function Inbox() {
   const mailboxes = (state?.accounts ?? []).filter((a) => a.kind === "email");
   const id = params.get("c") ?? state?.conversations[0]?.id ?? null;
   const now = state?.now ?? Date.now();
+
+  // Opening a chat marks it as seen up to its latest message
+  const openedLast = (state?.conversations ?? []).find((x) => x.id === id)?.last?.at ?? 0;
+  useEffect(() => {
+    if (!id || !openedLast || (seen[id] ?? 0) >= openedLast) return;
+    const next = { ...seen, [id]: openedLast };
+    setSeen(next);
+    try {
+      localStorage.setItem("gac_seen", JSON.stringify(next));
+    } catch {}
+  }, [id, openedLast]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -238,36 +247,49 @@ function Inbox() {
                   {f === "all" ? "All" : `Waiting · ${state?.stats.waiting ?? 0}`}
                 </button>
               ))}
-              <select className="ml-auto max-w-[130px] rounded-md bg-transparent text-[12.5px] text-[var(--ink-2)] outline-none hover:bg-[var(--hover)]" value={channel} onChange={(e) => setChannel(e.target.value)}>
-                <option value="all">All channels</option>
-                <option value="whatsapp">WhatsApp</option>
-                <option value="groups">WhatsApp groups</option>
-                <option value="email">Email</option>
-                {mailboxes.map((m) => (
-                  <option key={m.id} value={m.address}>
-                    Email · {m.address}
-                  </option>
-                ))}
-                <option value="team">Not clients (team, personal)</option>
-              </select>
+              <div className="ml-auto">
+                <Dropdown
+                  bare
+                  align="right"
+                  value={channel}
+                  onChange={setChannel}
+                  options={[
+                    { value: "all", label: "All channels" },
+                    { value: "whatsapp", label: "WhatsApp" },
+                    { value: "groups", label: "WhatsApp groups" },
+                    { value: "email", label: "Email" },
+                    ...mailboxes.map((m) => ({ value: m.address, label: m.address, hint: "mailbox" })),
+                    { value: "team", label: "Not clients", hint: "team, personal" },
+                  ]}
+                />
+              </div>
             </div>
           </div>
           <div className="scroll min-h-0 flex-1 px-2 pb-2">
-            {convs.map((x) => (
+            {convs.map((x) => {
+              const open = x.id === id;
+              const unread = !open && isUnread(x);
+              return (
               <button
                 key={x.id}
                 onClick={() => router.replace(`/inbox?c=${x.id}`)}
-                className={`flex w-full gap-3 rounded-xl px-3 py-3 text-left transition ${x.id === id ? "bg-[var(--bg)]" : "hover:bg-[var(--bg)]/60"}`}
+                className={`relative flex w-full gap-3 rounded-xl px-3 py-3 text-left transition ${
+                  open ? "bg-white shadow-[0_0_0_1px_var(--line-2),0_2px_8px_-4px_rgba(0,0,0,0.12)]" : "hover:bg-[var(--bg)]/70"
+                }`}
               >
+                {open && <span className="absolute bottom-3 left-0 top-3 w-[3px] rounded-full bg-[#171717]" />}
                 <Avatar name={x.name} size={36} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <span className={`truncate text-[14px] ${x.waiting ? "font-semibold" : ""}`}>{x.name}</span>
+                    <span className={`flex min-w-0 items-center gap-1.5 text-[14px] ${x.waiting || unread ? "font-semibold" : ""}`}>
+                      {unread && <span className="dot shrink-0" style={{ background: "#1d63b5" }} title="New since you last opened it" />}
+                      <span className="truncate">{x.name}</span>
+                    </span>
                     {x.waiting && x.waitingSince ? <Waiting since={x.waitingSince} now={now} /> : <span className="text-[11.5px] text-[var(--muted)]">{x.last ? ago(x.last.at, now) : ""}</span>}
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Channel c={x.channel} withLabel={false} />
-                    <span className={`truncate text-[13px] ${x.waiting ? "text-[var(--ink)]" : "text-[var(--muted)]"}`}>
+                    <span className={`truncate text-[13px] ${x.waiting || unread ? "text-[var(--ink)]" : "text-[var(--muted)]"}`}>
                       {x.last?.direction === "out" ? (x.repliedBy ? `${x.repliedBy.name}: ` : "You: ") : ""}
                       {x.last?.text}
                     </span>
@@ -279,7 +301,8 @@ function Inbox() {
                   )}
                 </div>
               </button>
-            ))}
+              );
+            })}
             {!state && <ListSkeleton />}
             {state && !convs.length && <div className="p-8 text-center text-[13px] text-[var(--muted)]">No conversations</div>}
           </div>
@@ -327,24 +350,19 @@ function Inbox() {
 
               {/* Settings for this client, as clear dropdowns */}
               <div className="flex flex-wrap items-center gap-2">
-                <ChipSelect label="Project" value={c.project ?? ""} onChange={(v) => action({ action: "project", project: v }, "Project saved")}>
-                  <option value="">None</option>
-                  {[...new Set([...(board?.projects ?? []), c.project ?? ""])].filter(Boolean).map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </ChipSelect>
-                <ChipSelect
+                <Dropdown
+                  label="Project"
+                  value={c.project ?? ""}
+                  onChange={(v) => action({ action: "project", project: v }, "Project saved")}
+                  options={[{ value: "", label: "None" }, ...[...new Set([...(board?.projects ?? []), c.project ?? ""])].filter(Boolean).map((p) => ({ value: p, label: p }))]}
+                />
+                <Dropdown
                   label="Remind after"
                   title="How long this client may wait before you're reminded"
                   value={String(c.remindAfter ?? "")}
                   onChange={(v) => action({ action: "remind_after", minutes: v === "" ? null : Number(v) }, "Reminder time saved")}
-                >
-                  {[...new Set([...REMIND, c.remindAfter ?? null])].map((m) => (
-                    <option key={m ?? "d"} value={m ?? ""}>
-                      {m === null ? "Default" : `${m} min`}
-                    </option>
-                  ))}
-                </ChipSelect>
+                  options={[...new Set([...REMIND, c.remindAfter ?? null])].map((m) => ({ value: m === null ? "" : String(m), label: m === null ? "Default" : `${m} min` }))}
+                />
                 {c.repliedBy && <Pill tone="blue">Reply sent by {c.repliedBy.name} · {ago(c.repliedBy.at, now)}</Pill>}
                 {c.demo && <Pill>Test data</Pill>}
                 {detail.links?.map((l) => {

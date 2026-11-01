@@ -34,7 +34,8 @@ export async function chat(prompt: string, session = "portal") {
   const res = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${GEMINI_API_KEY}`, "X-Session-Id": `${GEMINI_SESSION_ID ?? "gac"}-${session}` },
-    body: JSON.stringify({ model: GEMINI_MODEL, messages: [{ role: "user", content: PREFIX + prompt }] }),
+    // Cutting text to a length can split an emoji in half; the Gemini server rejects those broken characters
+    body: JSON.stringify({ model: GEMINI_MODEL, messages: [{ role: "user", content: (PREFIX + prompt).replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "") }] }),
     signal: AbortSignal.timeout(90_000),
   });
   const data = await res.json().catch(() => null);

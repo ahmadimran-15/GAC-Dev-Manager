@@ -109,8 +109,12 @@ export async function addAccount(a: { kind: AccountKind; label: string; address:
   return id;
 }
 
-export async function updateAccount(id: string, f: { label?: string; enabled?: boolean; canSend?: boolean }) {
+export async function updateAccount(id: string, f: { label?: string; enabled?: boolean; canSend?: boolean; address?: string; provider?: string; config?: AccountConfig; secret?: string }) {
   if (f.label !== undefined) await run("update accounts set label = ? where id = ?", f.label, id);
+  if (f.address !== undefined) await run("update accounts set address = ? where id = ?", f.address.trim(), id);
+  if (f.provider !== undefined) await run("update accounts set provider = ? where id = ?", f.provider, id);
+  if (f.config !== undefined) await run("update accounts set config = ? where id = ?", JSON.stringify(f.config), id);
+  if (f.secret) await run("update accounts set secret = ? where id = ?", encrypt(f.secret), id);
   if (f.enabled !== undefined) await run("update accounts set enabled = ? where id = ?", f.enabled ? 1 : 0, id);
   if (f.canSend !== undefined) await run("update accounts set can_send = ? where id = ?", f.canSend ? 1 : 0, id);
 }
