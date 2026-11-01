@@ -7,7 +7,23 @@ import { whisper, whisperConfigured } from "@/lib/stt";
 // The web-to-API server answers as chat text, so every prompt says how to format the answer.
 const PREFIX =
   "Ignore any earlier conversation in this session. Answer as plain text only, no markdown headings or bold. " +
+  "Do not use, open or mention any apps, extensions or tools (Shopify, Gmail, Maps, Workspace…); just write the text asked for. " +
   "When asked for JSON, return it inside one ```json code block and nothing else.\n\n";
+
+// The Gemini web app sometimes answers with its own prompts ("I'll need your permission to turn on the
+// Shopify app") or talks to the manager instead of writing the message. Never let that become a reply.
+const META =
+  /permission to (turn on|use|connect)|turn on the \w+ (app|extension)|connect (your|the) \w+ (account|app)|here(?:'s| is) (?:a|the|your) (?:quick|short|professional|polished|draft|message|reply)|message you can send|\[client name\]|as an ai\b|i can(?:'t|not) help with/i;
+
+// A client-facing message from Gemini: retried with a fresh session when it looks like Gemini talking to
+// us instead of a message to send; refused after that.
+async function clientMessage(prompt: string, session: string) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const text = strip(await chat(prompt, attempt ? `${session}-retry${attempt}-${Date.now()}` : session));
+    if (text && !META.test(text)) return text;
+  }
+  throw new Error("Gemini didn't return a usable message (it answered with an app or permission prompt). Try Generate again or type the reply.");
+}
 
 export const aiConfigured = () => !!(process.env.GEMINI_BASE_URL && process.env.GEMINI_API_KEY);
 export const transcriptionConfigured = () => whisperConfigured() || !!process.env.GOOGLE_AI_API_KEY;
@@ -35,11 +51,11 @@ export function parseJson<T>(text: string): T {
 const strip = (t: string) => t.replace(/^["'`]+|["'`]+$/g, "").trim();
 
 export async function polish(text: string) {
-  return strip(await chat(`Fix grammar, spelling and tone of this client-facing message. Keep the meaning, keep it short, warm and professional. Return only the corrected message.\n\nMessage:\n${text}`, "polish"));
+  return clientMessage(`Fix grammar, spelling and tone of this client-facing message. Keep the meaning, keep it short, warm and professional. Return only the corrected message.\n\nMessage:\n${text}`, "polish");
 }
 
 export async function rewrite(text: string, instructions: string) {
-  return strip(await chat(`Rewrite this client message following the manager's instruction (it may be in English, Urdu or Hindi). Keep it short and professional, in English. Return only the final message.\n\nMessage:\n${text}\n\nInstruction:\n${instructions}`, "rewrite"));
+  return clientMessage(`Rewrite this client message following the manager's instruction (it may be in English, Urdu or Hindi). Keep it short and professional, in English. Return only the final message.\n\nMessage:\n${text}\n\nInstruction:\n${instructions}`, "rewrite");
 }
 
 async function transcriptFor(convId: string, limit = 12) {
@@ -55,14 +71,12 @@ export async function suggestReply(convId: string) {
   if (!c) return null;
   const msgs = await getMessages(convId);
   const lastIn = [...msgs].reverse().find((m) => m.direction === "in");
-  const text = strip(
-    await chat(
-      `You are the project manager of a software agency replying to a client${c.project ? ` about the "${c.project}" project` : ""}. ` +
-        `Write the next reply to the client's latest messages. Be short (1–3 sentences), warm and professional, in English. ` +
-        `You don't know technical details, so acknowledge, say the team is on it and promise a concrete update time when it fits. ` +
-        `Address them by first name. Return only the reply text.\n\nConversation:\n${await transcriptFor(convId)}`,
-      `suggest-${convId}`,
-    ),
+  const text = await clientMessage(
+    `You are the project manager of a software agency replying to a client${c.project ? ` about the "${c.project}" project` : ""}. ` +
+      `Write the next reply to the client's latest messages. Be short (1–3 sentences), warm and professional, in English. ` +
+      `You don't know technical details, so acknowledge, say the team is on it and promise a concrete update time when it fits. ` +
+      `Address them by first name. Return only the reply text.\n\nConversation:\n${await transcriptFor(convId)}`,
+    `suggest-${convId}`,
   );
   await updateConversation(convId, { suggestion: text, suggestion_for: lastIn?.id ?? null });
   return text;
@@ -74,17 +88,15 @@ export async function generateReply(convId: string, input: string) {
   const c = await getConversation(convId);
   if (!c) throw new Error("Conversation not found");
   const group = c.channel === "whatsapp" && c.external_id.endsWith("@g.us");
-  return strip(
-    await chat(
-      `You are the project manager of a software agency writing to a client${group ? " in their WhatsApp group" : ""}${c.project ? ` about the "${c.project}" project` : ""}. ` +
-        (input.trim()
-          ? `The manager typed or dictated this (it may be a rough draft or an instruction, in English, Urdu, Hindi or a mix):\n"${input.trim()}"\n\n` +
-            `Write the final message following it. If it's a draft, keep its meaning and improve it; if it's an instruction, do what it says. ` +
-            `If they ask to tag or mention someone, put @ followed by that person's name exactly as the manager wrote it (e.g. @TuLab) where it fits. `
-          : `Write the next reply to the client's latest messages. `) +
-        `Short, warm and professional, in English. Return only the message.\n\nConversation:\n${await transcriptFor(convId, 20)}`,
-      `generate-${convId}`,
-    ),
+  return clientMessage(
+    `You are the project manager of a software agency writing to a client${group ? " in their WhatsApp group" : ""}${c.project ? ` about the "${c.project}" project` : ""}. ` +
+      (input.trim()
+        ? `The manager typed or dictated this (it may be a rough draft or an instruction, in English, Urdu, Hindi or a mix):\n"${input.trim()}"\n\n` +
+          `Write the final message following it. If it's a draft, keep its meaning and improve it; if it's an instruction, do what it says. ` +
+          `If they ask to tag or mention someone, put @ followed by that person's name exactly as the manager wrote it (e.g. @TuLab) where it fits. `
+        : `Write the next reply to the client's latest messages. `) +
+      `Write the message itself, addressed to the client, not a note to the manager about it. Short, warm and professional, in English. Return only the message.\n\nConversation:\n${await transcriptFor(convId, 20)}`,
+    `generate-${convId}`,
   );
 }
 
