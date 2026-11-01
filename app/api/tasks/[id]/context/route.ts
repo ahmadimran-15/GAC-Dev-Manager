@@ -11,6 +11,6 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     const t = await taskDetail(id);
     return NextResponse.json({ summary: await summarizeTask(t), looms: t.looms, at: Date.now() });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 502 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }
 }

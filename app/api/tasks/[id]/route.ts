@@ -7,6 +7,6 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   try {
     return NextResponse.json(await taskDetail(id));
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "ClickUp failed" }, { status: 502 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "ClickUp failed" }, { status: 500 });
   }
 }

@@ -17,6 +17,6 @@ export async function POST(req: Request) {
     }
     return NextResponse.json(r);
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "ClickUp failed" }, { status: 502 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "ClickUp failed" }, { status: 500 });
   }
 }

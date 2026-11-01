@@ -15,6 +15,6 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ error: "Unknown mode" }, { status: 400 });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "AI failed" }, { status: 502 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "AI failed" }, { status: 500 });
   }
 }

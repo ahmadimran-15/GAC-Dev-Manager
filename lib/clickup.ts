@@ -76,6 +76,7 @@ const mapTask = (t: Any): Task => ({
   spentMin: Math.round(Number(t.time_spent ?? 0) / 60000),
   estimateMin: t.time_estimate ? Math.round(Number(t.time_estimate) / 60000) : null,
   url: t.url,
+  priority: (["urgent", "high", "normal", "low"].includes(String(t.priority?.priority)) ? t.priority.priority : null) as Task["priority"],
   dueAt: t.due_date ? Number(t.due_date) : null,
   doneAt: t.date_done ? Number(t.date_done) : t.date_closed ? Number(t.date_closed) : null,
 });

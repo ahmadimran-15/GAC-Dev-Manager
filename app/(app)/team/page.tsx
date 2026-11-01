@@ -2,12 +2,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { ExternalLink, Loader2, PlayCircle, RotateCw, Sparkles, X } from "lucide-react";
 import type { Board } from "@/lib/clickup";
-import { api } from "@/components/Live";
+import { api, useLive } from "@/components/Live";
+import Dropdown from "@/components/Dropdown";
 import { Avatar, Pill, ago } from "@/components/ui";
 import { TeamSkeleton } from "@/components/Skeleton";
 import { EstimateBox, StatusSelect, TimerButton, clock, hm, useTick, type Estimate, type RunningTimer } from "@/components/TaskControls";
 
 const FILTERS = ["Open", "In progress", "Blocked", "Done", "All"] as const;
+
+type T = Board["tasks"][number];
+const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+const PRIORITY_TONE = { urgent: "red", high: "amber", normal: "gray", low: "gray" } as const;
+const STATUS_RANK = (s: string) => (/block/.test(s) ? 0 : /progress|revision/.test(s) ? 1 : /complete|done|closed/.test(s) ? 4 : /to do|open/.test(s) ? 2 : 3);
+const byDue = (a: T, b: T) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity);
+const SORTS = {
+  priority: { label: "Priority", fn: (a: T, b: T) => (PRIORITY_RANK[a.priority ?? "normal"] ?? 2) - (PRIORITY_RANK[b.priority ?? "normal"] ?? 2) || byDue(a, b) },
+  due: { label: "Due date", fn: byDue },
+  person: { label: "Person", fn: (a: T, b: T) => a.assignee.localeCompare(b.assignee) || (PRIORITY_RANK[a.priority ?? "normal"] ?? 2) - (PRIORITY_RANK[b.priority ?? "normal"] ?? 2) },
+  status: { label: "Status", fn: (a: T, b: T) => STATUS_RANK(a.status) - STATUS_RANK(b.status) || a.status.localeCompare(b.status) },
+  project: { label: "Project", fn: (a: T, b: T) => a.project.localeCompare(b.project) },
+};
 const isDone = (s: string) => /complete|done|closed/.test(s);
 const when = (t: number) => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
@@ -39,6 +53,7 @@ type TeamData = Board & {
   estimates: Record<string, Estimate>;
   changes: Change[];
   performance: Perf[];
+  timersOn: boolean;
 };
 
 interface Detail {
@@ -127,7 +142,7 @@ function TaskPanel({ id, data, now, onClose, reload }: { id: string; data: TeamD
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <StatusSelect taskId={d.id} status={d.status} onChanged={refresh} />
-                <TimerButton taskId={d.id} assignee={d.assignee} running={running} now={now} onChanged={refresh} />
+                {(data.timersOn || running) && <TimerButton taskId={d.id} assignee={d.assignee} running={running} now={now} onChanged={refresh} />}
                 {d.url && (
                   <a href={d.url} target="_blank" className="btn btn-sm btn-ghost">
                     Open in ClickUp <ExternalLink size={12} />
@@ -200,6 +215,129 @@ function TaskPanel({ id, data, now, onClose, reload }: { id: string; data: TeamD
   );
 }
 
+// Time spent on one project: total, and per person (tasks, tracked, estimate)
+function ProjectTime({
+  name,
+  tasks,
+  trackedOf,
+  targetOf,
+}: {
+  name: string;
+  tasks: Board["tasks"];
+  trackedOf: (t: Board["tasks"][number]) => number;
+  targetOf: (t: Board["tasks"][number]) => number | null;
+}) {
+  const people = new Map<string, { tasks: number; done: number; tracked: number; target: number }>();
+  for (const t of tasks) {
+    const p = people.get(t.assignee) ?? { tasks: 0, done: 0, tracked: 0, target: 0 };
+    p.tasks++;
+    if (isDone(t.status)) p.done++;
+    p.tracked += trackedOf(t);
+    p.target += targetOf(t) ?? 0;
+    people.set(t.assignee, p);
+  }
+  const rows = [...people].sort((a, b) => b[1].tracked - a[1].tracked);
+  const total = rows.reduce((s, [, p]) => s + p.tracked, 0);
+  const target = rows.reduce((s, [, p]) => s + p.target, 0);
+  return (
+    <div className="card mb-3 px-5 py-4">
+      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+        <div className="text-[13.5px] font-semibold">{name}</div>
+        <div className="tnum text-[13px] text-[var(--ink-2)]">
+          <b className="text-[18px] font-semibold text-[var(--ink)]">{hm(total)}</b> tracked
+          {target ? <span className="text-[var(--muted)]"> of {hm(target)} estimated</span> : null}
+        </div>
+        <div className="text-[12.5px] text-[var(--muted)]">
+          {tasks.filter((t) => isDone(t.status)).length} of {tasks.length} tasks done
+        </div>
+      </div>
+      <table className="tnum mt-3 w-full text-left text-[13px]">
+        <thead>
+          <tr className="text-[12px] text-[var(--muted)]">
+            {["Person", "Tasks done", "Time tracked", "Estimated", ""].map((h, i) => (
+              <th key={i} className="pb-1.5 font-medium">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([person, p]) => {
+            const over = p.target && p.tracked > p.target;
+            return (
+              <tr key={person} className="border-t border-[var(--line)]">
+                <td className="py-2">
+                  <span className="flex items-center gap-2">
+                    <Avatar name={person} size={22} /> {person}
+                  </span>
+                </td>
+                <td className="py-2">
+                  {p.done} / {p.tasks}
+                </td>
+                <td className={`py-2 ${over ? "text-[var(--red)]" : ""}`}>{hm(p.tracked)}</td>
+                <td className="py-2 text-[var(--ink-2)]">{p.target ? hm(p.target) : "—"}</td>
+                <td className="py-2 text-right text-[12px] text-[var(--muted)]">{p.target && p.tracked ? `${Math.round((p.tracked / p.target) * 100)}% of estimate` : ""}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Tasks per person by state, as stacked horizontal bars (done · in progress · open)
+const STATE = [
+  { key: "done", label: "Done", color: "#22794d" },
+  { key: "active", label: "In progress", color: "#1d63b5" },
+  { key: "open", label: "Open", color: "#c9821a" },
+] as const;
+
+function TeamBars({ tasks, people, perf, onPick }: { tasks: Board["tasks"]; people: string[]; perf: Map<string, Perf>; onPick: (p: string) => void }) {
+  const rows = people
+    .map((name) => {
+      const mine = tasks.filter((t) => t.assignee === name);
+      const done = mine.filter((t) => isDone(t.status)).length;
+      const active = mine.filter((t) => !isDone(t.status) && /progress|revision/.test(t.status)).length;
+      return { name, done, active, open: mine.length - done - active, total: mine.length };
+    })
+    .sort((a, b) => b.total - a.total);
+  const max = Math.max(1, ...rows.map((r) => r.total));
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap gap-3 text-[12px] text-[var(--ink-2)]">
+        {STATE.map((s) => (
+          <span key={s.key} className="inline-flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: s.color }} /> {s.label}
+          </span>
+        ))}
+      </div>
+      <div className="space-y-3">
+        {rows.map((r) => {
+          const p = perf.get(r.name);
+          return (
+            <button key={r.name} className="block w-full text-left" onClick={() => onPick(r.name)} title={`${r.name}: ${r.done} done, ${r.active} in progress, ${r.open} open`}>
+              <div className="mb-1 flex items-baseline justify-between gap-2 text-[12.5px]">
+                <span className="truncate font-medium text-[var(--ink)]">{r.name}</span>
+                <span className="tnum shrink-0 text-[var(--muted)]">
+                  {r.total} tasks{p?.trackedWeek ? ` · ${hm(p.trackedWeek)} this week` : ""}
+                </span>
+              </div>
+              <div className="flex h-3 gap-[2px]" style={{ width: `${Math.max(6, (r.total / max) * 100)}%` }}>
+                {STATE.map((s) => {
+                  const n = r[s.key];
+                  return n ? <span key={s.key} className="h-full first:rounded-l-[4px] last:rounded-r-[4px]" style={{ flex: n, background: s.color }} title={`${s.label}: ${n}`} /> : null;
+                })}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-4 text-[12px] text-[var(--muted)]">Tasks in current projects. Click a person to see their tasks.</p>
+    </div>
+  );
+}
+
 export default function Team() {
   const [data, setData] = useState<TeamData | null>(null);
   const [person, setPerson] = useState<string | null>(null);
@@ -207,6 +345,7 @@ export default function Team() {
   const [f, setF] = useState<(typeof FILTERS)[number]>("Open");
   const [loading, setLoading] = useState(false);
   const [openTask, setOpenTask] = useState<string | null>(null);
+  const [sort, setSort] = useState("priority");
   const now = useTick(data?.now);
 
   const load = useCallback(async (refresh = false) => {
@@ -230,10 +369,17 @@ export default function Team() {
   const live = data?.source === "clickup";
   const tasks = all
     .filter((t) => (!person || t.assignee === person) && (!project || t.project === project))
-    .filter((t) => (f === "All" ? true : f === "Done" ? isDone(t.status) : f === "Open" ? !isDone(t.status) : f === "Blocked" ? /block/.test(t.status) : /progress|revision/.test(t.status)));
+    .filter((t) => (f === "All" ? true : f === "Done" ? isDone(t.status) : f === "Open" ? !isDone(t.status) : f === "Blocked" ? /block/.test(t.status) : /progress|revision/.test(t.status)))
+    .sort(SORTS[sort as keyof typeof SORTS]?.fn ?? SORTS.priority.fn);
   const current = (data?.projectInfo ?? []).filter((p) => p.current);
   const otherStages = [...new Set((data?.projectInfo ?? []).filter((p) => !p.current).map((p) => p.stage))];
   const runningFor = (taskId: string) => data?.running.find((r) => r.task_id === taskId);
+  // The time a task should take: your estimate, else Gemini's, else ClickUp's
+  const targetOf = (t: { id: string; estimateMin: number | null }) => data?.estimates[t.id]?.my_min ?? data?.estimates[t.id]?.ai_min ?? t.estimateMin ?? null;
+  const trackedOf = (t: { id: string; spentMin: number }) => (data?.tracked[t.id] ?? 0) || t.spentMin;
+  const [estimating, setEstimating] = useState(false);
+  const [side, setSide] = useState<"projects" | "performance">("projects");
+  const { toast } = useLive();
   const perf = new Map((data?.performance ?? []).map((p) => [p.person, p]));
 
   return (
@@ -246,9 +392,49 @@ export default function Team() {
             {data?.error && <span className="text-[var(--red)]"> ClickUp error: {data.error}</span>}
           </p>
         </div>
-        <button className="btn btn-sm" onClick={() => load(true)} disabled={loading}>
-          <RotateCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
-        </button>
+        <div className="flex gap-2">
+          {data && (
+            <button
+              className={`btn btn-sm ${data.timersOn ? "" : "!text-[var(--muted)]"}`}
+              title={data.timersOn ? "Timers run while a task is in progress or in revision. Click to switch them off (stops every running timer)." : "Timers are off: nothing is being timed. Click to switch them on."}
+              onClick={async () => {
+                const on = !data.timersOn;
+                if (!on && !confirm("Switch timers off? Every running timer stops.")) return;
+                try {
+                  await api("/api/timers", { action: "enabled", on });
+                  toast(on ? "Timers on: tasks in progress / revision are timed from now" : "Timers off");
+                  await load();
+                } catch (e) {
+                  toast(e instanceof Error ? e.message : "Failed", "error");
+                }
+              }}
+            >
+              <span className="dot" style={{ background: data.timersOn ? "var(--green)" : "#cfcfca" }} /> Timers {data.timersOn ? "on" : "off"}
+            </button>
+          )}
+          <button
+            className="btn btn-sm"
+            disabled={estimating || !live}
+            title="Gemini's strict estimate for every open task that has none yet"
+            onClick={async () => {
+              setEstimating(true);
+              try {
+                const r = await api<{ estimated: number }>("/api/estimates", {});
+                await load();
+                toast(r.estimated ? `Gemini estimated ${r.estimated} open task${r.estimated === 1 ? "" : "s"}` : "Every open task already has an estimate");
+              } catch (e) {
+                toast(e instanceof Error ? e.message : "Gemini failed", "error");
+              } finally {
+                setEstimating(false);
+              }
+            }}
+          >
+            <Sparkles size={13} className={estimating ? "animate-pulse" : ""} /> {estimating ? "Estimating…" : "Estimate open tasks"}
+          </button>
+          <button className="btn btn-sm" onClick={() => load(true)} disabled={loading}>
+            <RotateCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
+          </button>
+        </div>
       </div>
 
       {!data && <TeamSkeleton />}
@@ -319,14 +505,18 @@ export default function Team() {
                   </button>
                 )}
               </h2>
-              <div className="flex gap-1">
+              <div className="flex flex-wrap items-center gap-1">
                 {FILTERS.map((x) => (
                   <button key={x} onClick={() => setF(x)} className={`rounded-full px-3 py-1 text-[12.5px] ${f === x ? "bg-[#171717] text-white" : "text-[var(--ink-2)] hover:bg-white"}`}>
                     {x}
                   </button>
                 ))}
+                <span className="ml-1">
+                  <Dropdown label="Sort" align="right" value={sort} onChange={setSort} options={Object.entries(SORTS).map(([k, v]) => ({ value: k, label: v.label }))} />
+                </span>
               </div>
             </div>
+            {project && <ProjectTime name={project} tasks={all.filter((t) => t.project === project)} trackedOf={trackedOf} targetOf={targetOf} />}
             <div className="card overflow-x-auto">
               <table className="w-full min-w-[820px] text-left text-[13.5px]">
                 <thead>
@@ -342,17 +532,20 @@ export default function Team() {
                   {tasks.map((t) => {
                     const tracked = (data?.tracked[t.id] ?? 0) || t.spentMin;
                     const e = data?.estimates[t.id];
-                    const target = e?.my_min ?? t.estimateMin ?? e?.ai_min ?? null;
+                    const target = targetOf(t);
                     const over = target && tracked > target;
                     return (
                       <tr key={t.id} onClick={() => live && setOpenTask(t.id)} className={`border-b border-[var(--line)] last:border-0 hover:bg-[var(--bg)]/60 ${live ? "cursor-pointer" : ""}`}>
                         <td className="px-4 py-3">
                           <div className="font-medium">{t.title}</div>
-                          <div className="text-[12px] text-[var(--muted)]">{t.project}</div>
+                          <div className="mt-0.5 flex items-center gap-2 text-[12px] text-[var(--muted)]">
+                            {t.priority && t.priority !== "normal" && <Pill tone={PRIORITY_TONE[t.priority]}>{t.priority}</Pill>}
+                            {t.project}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <span className="flex items-center gap-2 whitespace-nowrap">
-                            <Avatar name={t.assignee} size={22} /> {t.assignee.split(" ")[0]}
+                            <Avatar name={t.assignee} size={22} /> {t.assignee}
                           </span>
                         </td>
                         <td className="px-4 py-3">{live ? <StatusSelect taskId={t.id} status={t.status} onChanged={reload} /> : <Pill>{t.status}</Pill>}</td>
@@ -362,12 +555,12 @@ export default function Team() {
                             <span className="text-[var(--muted)]">
                               {" "}
                               / {hm(target)}
-                              {e?.my_min ? "" : e?.ai_min && !t.estimateMin ? " AI" : ""}
+                              {e?.my_min ? "" : e?.ai_min ? <span title={e.ai_note ?? "Gemini's estimate"} className="ml-1 rounded bg-[var(--bg)] px-1 text-[10.5px]">AI</span> : ""}
                             </span>
                           ) : null}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-[var(--ink-2)]">{t.due ?? "—"}</td>
-                        <td className="px-4 py-3 text-right">{live && !isDone(t.status) && <TimerButton taskId={t.id} assignee={t.assignee} running={runningFor(t.id)} now={now} onChanged={reload} />}</td>
+                        <td className="px-4 py-3 text-right">{live && !isDone(t.status) && (data?.timersOn || runningFor(t.id)) && <TimerButton taskId={t.id} assignee={t.assignee} running={runningFor(t.id)} now={now} onChanged={reload} />}</td>
                       </tr>
                     );
                   })}
@@ -435,11 +628,23 @@ export default function Team() {
         </div>
 
         <aside className="space-y-10">
-          {/* Projects */}
+          {/* Projects | Team performance */}
           <div>
-            <h2 className="mb-3 text-[13.5px] font-semibold">
-              Current projects <span className="tnum font-normal text-[var(--muted)]">{current.length}</span>
-            </h2>
+            <div className="mb-3 flex gap-1 rounded-xl bg-[var(--hover)] p-1">
+              {(
+                [
+                  ["projects", `Current projects · ${current.length}`],
+                  ["performance", "Team performance"],
+                ] as const
+              ).map(([k, label]) => (
+                <button key={k} onClick={() => setSide(k)} className={`flex-1 rounded-lg px-2 py-1.5 text-[12.5px] font-medium ${side === k ? "bg-white text-[var(--ink)] shadow-[0_1px_2px_rgba(0,0,0,0.06)]" : "text-[var(--ink-2)]"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {side === "performance" && data && <TeamBars tasks={all} people={data.team} perf={perf} onPick={(p) => (setPerson(p), setProject(null))} />}
+            {side === "projects" && (
+            <>
             <div className="space-y-0.5">
               {current.map((p) => {
                 const open = all.filter((t) => t.project === p.name && !isDone(t.status)).length;
@@ -460,6 +665,8 @@ export default function Team() {
                   </div>
                 ))}
               </div>
+            )}
+            </>
             )}
           </div>
 

@@ -141,109 +141,102 @@ components/              Live (polling context, api helper, toast), TopNav (heal
 
 ---
 
-## 5. What is DONE and TESTED (live)
+## 5. What is DONE and TESTED (live, as of 2026-11-02)
 
 | Area | State |
 |---|---|
-| Login | Owner + team logins in Supabase (scrypt). Wrong password rejected. Team blocked from owner pages/APIs (403 / redirect to /portal). Sessions auto-renew. |
-| Live data only | Demo data deleted, `SEED_DEMO=0`. Supabase had 0 conversations at handoff. |
-| WhatsApp in | Signed webhook registered on the gateway next to n8n; gateway test delivery → 200; messages stored as "waiting"; own phone replies recorded; groups only if tracked. |
-| WhatsApp out | Send from conversation with From picker; new message to any group (188) / contact (1,478) with search (tested search; **no real message was sent in tests**). |
-| Email | IMAP/SMTP code + accounts UI + Test connection. **Both mailboxes fail login** (see §7). |
-| AI | Suggested replies auto-drafted (tested), polish, ticket drafting from Urdu/Roman-Urdu instructions, assistant (reply / task / search ClickUp+email+chats / answer). "Find the Loom for Aman" searched ClickUp correctly. |
-| Ticketing | Select messages → instructions (voice/text) → Gemini draft → edit → create in ClickUp current project (or new list). |
-| Team portal | Teammate submits update (project + optional client); owner approves → reply in client chat **or** send anywhere (RecipientPicker); discard; teammate sees status. Tested end to end (test user deleted after). |
-| Reminders | Popup every N min with drafted replies + snooze, instant new-message alert + chime + desktop notification, WhatsApp summary to owner, new-email alert to owner's WhatsApp. |
-| Quick acknowledge | One click, same channel. |
-| Health | Checks every 10 min + "Check now"; top-bar "N issues" badge; Start session / Show QR for WhatsApp. At handoff: DB, tunnel, ClickUp, WhatsApp, STT, Gemini OK; 2 mailboxes red. |
-| STT | Local Whisper small tested through `/api/stt` (perfect English transcript, free/offline). |
-| Team page | Live ClickUp: people cards, 20 current projects with owners, tasks table, task panel with comments + Loom links. |
-| Supabase | Migration done, RLS on, session pooler, ~0.5 s dashboard poll. |
-| GitHub | Pushed up to commit `aa5b107`; **commit `c9bfb72` (logins/picker/health) is local, not pushed.** |
+| Login | Owner + team logins in Supabase (scrypt). Team blocked from owner pages/APIs (403 / redirect to /portal). Team logins can be linked to a ClickUp member (Settings → Logins dropdown). |
+| Live data only | `SEED_DEMO=0`. All test rows created while testing were deleted (drafts, timers, estimates, test logins). |
+| WhatsApp in | Signed webhook on the gateway (events `message.received, message.sent, message.ack, message.failed`) next to the owner's n8n webhook (untouched). Gateway test delivery → 200. |
+| WhatsApp history import | `lib/backfill.ts`: walks the gateway's message log (`GET /messages?after=` keyset, 100/page) on startup, on session reconnect, and Settings → "Import recent chats". 7 days imported (~2,700 msgs, 35 direct chats + 12 client groups). Groups are imported only if a team number is a member/wrote, or already tracked (family groups were wrongly imported once and removed). New chats whose last client message is >24 h old are marked handled. |
+| Our side | Settings → "Our side: team numbers" (kv `team_numbers`, default Abdullah +1 305 508 3815). Their messages in a group = our reply ("Replied by Abdullah"); direct chat with them = internal. "Not a client" button for personal chats. Sender names instead of raw `@c.us`/`@lid` ids (lid resolved via gateway `/contacts/{id}/phone`). |
+| Delivery ticks | ✓ sent, ✓✓ delivered, blue ✓✓ read, red ! failed — from `message.ack` + 2-min sync fallback. |
+| Replies | Reply box (inbox + waiting cards): voice → text, **Generate** turns a draft/instruction into the message, `@Name` → real WhatsApp mention, every WhatsApp send quotes the client's last message (falls back to unquoted). Guard rejects Gemini "app/permission" prompts and notes-to-manager. **Not yet verified with a real send.** |
+| AI context | Per-conversation summary box (all channels, hideable), ClickUp task "Get context" (+ Looms). |
+| Gemini | ONE session id for all calls (`GEMINI_SESSION_ID="sessiond id3"`, from the owner's curl) + a queue so calls don't overlap — per-feature ids caused the server's new-chat rate limit. Broken emoji stripped before sending. Server sometimes answers "Google session expired / throttled" → owner reconnects Google on that server. |
+| ClickUp | Two-way status sync (dropdown in Team table + panel writes to ClickUp; webhook logs ClickUp-side changes, signed, no echo duplicates). Webhook auto-registers at PUBLIC_URL. Priority shown + **Sort** (priority/due/person/status/project). |
+| Estimates | Your private estimate + Gemini's. Gemini is **strict/low** (team builds with Claude: small fix 30–45 min, feature 1–3 h, big 4–8 h max). Batch "Estimate open tasks" button + every 10 min in the background. |
+| Team page | Full names, tracked/estimate column, per-project time breakdown (click a project: total, per person tasks/time/estimate), right-side tabs **Current projects / Team performance** (stacked bars per person: done · in progress · open). |
+| Tickets | Inbox → select messages → Gemini picks project + assignee from your words ("internal tasks, assign to Muhammad Ahmed") → ClickUp; linked tickets shown in the thread header. |
+| Reminders | Per-client "Remind after"; WhatsApp + email (REMINDER_EMAIL_TO) summaries say "client group" and cap at 15. |
+| Inbox UI | Clear header dropdowns (custom searchable `components/Dropdown.tsx`), open chat highlighted, unread dot, channel filter (WhatsApp / groups / email / mailbox / not clients). |
+| Settings | Edit mailboxes (provider/address/password — tests before saving) and WhatsApp numbers (name/URL/key). Team numbers, import, ClickUp webhook button. |
+| Supabase | 11 tables, RLS on everywhere, zero policies; session pooler 5432. |
+| GitHub | **Nothing pushed this session.** Local commits since `aa5b107`: `c9bfb72` … latest (see `git log`). Ask before pushing. |
 
 ---
 
-## 6. IN PROGRESS when the chat ended (code written, NOT wired, NOT type-checked)
+## 6. ⏸ TIMERS — BUILT, SWITCHED OFF, NEED THE OWNER'S APPROVAL TO TURN ON
 
-Owner's original list (and their latest message) asked for these; status:
+**Do not switch timers on without the owner saying so.** The owner will connect GAC Desk to the team's own
+**tracking portal** first (they will provide its APIs) so that breaks pause the clock, etc.
 
-1. **Two-way ClickUp status sync** — written: `lib/clickup.ts` (taskStatuses, setTaskStatus, registerClickupWebhook),
-   `app/api/webhooks/clickup/route.ts` (verifies `X-Signature` with secret stored in kv `clickup_webhook`, logs to
-   `status_log`, invalidates board, stops timers when a task is done).
-   **TODO:** registration action (call `registerClickupWebhook(\`${PUBLIC_URL}/api/webhooks/clickup\`)`, save
-   `{id, secret, endpoint}` to kv `clickup_webhook`; run on startup when PUBLIC_URL changes + button in Settings);
-   API `app/api/tasks/[id]/status/route.ts` (GET options, POST {status} → setTaskStatus + logStatus source "dashboard");
-   status dropdown in Team table + TaskPanel; show recent changes (recentStatusChanges) on Overview/Team.
-2. **Time tracking (start/stop per person per task)** — written: `lib/timers.ts`, tables `timers`, `status_log`.
-   **TODO:** `app/api/timers/route.ts` (GET running + minutes; POST start {taskId,title,project,person} / stop {id});
-   owner: Start/Stop for any assignee in Team table & panel, live running timers ("Working now") with ticking clock;
-   team: portal "My tasks" (map login → ClickUp username via new `users.clickup_name`; add a ClickUp-member dropdown in
-   LoginsManager create/edit) with Start/Pause/Stop; show tracked time vs estimate. Free plan ⇒ only the owner's time is
-   copied to ClickUp; everyone else's lives in `timers` (this is the tamper-proof log).
-3. **Performance dashboard + estimates** — written: `lib/estimates.ts` (setMyEstimate, aiEstimate, estimatesMap).
-   **TODO:** `app/api/tasks/[id]/estimate/route.ts` (POST {myMin} or {ai:true}); show "Your estimate" (owner only) + "AI
-   projection" (+reason) in TaskPanel and table; performance section per person: open/done, tracked today/week
-   (minutesByPerson), estimate accuracy (tracked vs my_min), on-time (done before due).
-4. **Ticket ↔ message links** — table `task_links` exists. **TODO:** in `/api/tasks` POST accept `conv_id` +
-   `message_ids`, insert into task_links after createTask (returns `id`, `url`); TaskDrawer send them; show linked tickets
-   (with live ClickUp status) in the Inbox thread header.
-5. **Per-client reminder time** — column `conversations.remind_after` exists. **TODO:** include `remindAfter` in
-   ConvSummary; select in thread header (default/5/15/30/60 min); Reminders.tsx + remindOnWhatsApp use it.
-   **Email reminder:** add `REMINDER_EMAIL_TO`, send summary from the first working mailbox.
-6. **Rewrite with instruction** for team drafts — removed during the DraftCard rewrite; re-add the instruction input +
-   "Rewrite" (API `mode:"rewrite"` already exists). **Portal rate limit:** ~30 submissions/hour per user.
-7. **Slack** — NOT started. Plan (agreed approach): Slack has no QR login. Create a Slack app **from a manifest** (prefilled
-   link `https://api.slack.com/apps?new_app=1&manifest_json=<urlencoded>`) with **Socket Mode** (no public URL needed),
-   user-token scopes `channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read
-   users:read chat:write`, user events `message.channels message.groups message.im message.mpim`. Owner installs to their
-   workspace and pastes **User OAuth Token (xoxp-)** + **App-Level Token (xapp-, connections:write)** in Settings → add
-   account kind `slack` (secret JSON). Worker: `apps.connections.open` → WebSocket (Node 22 global WebSocket) → ack
-   envelopes → message events → conversation channel `slack`, external_id = channel id; send via `chat.postMessage` with
-   the user token (posts as the owner). RecipientPicker: Slack channels/DMs (`conversations.list`, `users.list`). Health:
-   `auth.test`. Clients often join the owner's own workspace (incl. Slack Connect), so one install covers them.
-8. Outlook / Teams — skipped by owner for now (needs Azure app, "Sign in with Microsoft").
+What exists (`lib/timers.ts`):
+- Master switch kv `timers_on` (`"0"` now). Team page → "Timers on/off" button, `POST /api/timers {action:"enabled", on}`.
+  While off: every start is refused (owner Start buttons, portal "My tasks", status sync) and the buttons are hidden.
+- Status-driven rule (owner's spec): ClickUp status **in progress** or **revision** → timer runs for the assignee;
+  any other status → paused; complete/closed → stopped, task total final. Implemented as `syncStatusTimers(tasks)`
+  (acts only on status *changes*, stored in kv `status_seen`), called by the ClickUp webhook, by the status dropdown,
+  and by the worker every 2 min. Timers for tasks that left Current Projects are stopped.
+- Manual Start/Pause still exists (one running timer per person) and portal "My tasks".
+- Free ClickUp plan ⇒ only the token owner's time is copied to ClickUp as a time entry ("GAC Desk timer").
+- **To do when the owner approves:** plug in the tracking-portal API (break/active state per person → pause/resume),
+  then switch on. Turning on clears `status_seen`, so only changes from that moment start clocks.
 
-After wiring: `npx tsc --noEmit` (slow, ~3–5 min), `npm run build`, restart, test each with curl, clean test data, commit.
+Incident on 2026-11-02: before the switch existed, status sync auto-started 23 timers (~45 min total). Timers were
+switched off; the 23 local rows (`timers.started_by = 'ClickUp status'`) and **3 ClickUp time entries** (2 min each,
+description "GAC Desk timer", on the owner's tasks MJP Electrical landing page / MJP Dashboard / Dev team ClickUp
+cleanup) still exist — deleting them was blocked by the permission check and is waiting for the owner's OK.
 
 ---
 
-## 7. Known issues / owner to-dos
+## 7. Still to build
 
-- **Titan mailbox (m.ahmad@getaichatbots.com):** IMAP/SMTP "AuthenticationError" → wrong password or app access disabled.
-- **Gmail:** saved as **jimaesmith9871@gmail.com** but owner wrote **jimmysmith9871@gmail.com** (typo) AND Google requires
-  an **App Password** (2-Step Verification → App passwords). Fix in Settings → Mailboxes (remove + add, Test connection).
-- Tunnel URL changes on restart → update PUBLIC_URL, restart, Settings → Register webhook. Final fix = VM + DuckDNS.
-- ClickUp Settings row still shows the ClickUp webhook URL built from `window.location.origin` (localhost) — switch to
-  `PUBLIC_URL` when wiring §6.1.
-- Owner's password was shown in chat → remind them to change it.
-- Supabase MCP was authenticated by the owner in a terminal, but it only loads in a **new** Claude session started in this
-  folder (`.mcp.json` has `supabase` + `clickup`). The app itself uses the direct DB connection.
+1. **Slack** — NOT started. Plan: Slack app **from a manifest** (prefilled link
+   `https://api.slack.com/apps?new_app=1&manifest_json=<urlencoded>`), **Socket Mode**, user-token scopes
+   `channels:history groups:history im:history mpim:history channels:read groups:read im:read mpim:read users:read chat:write`,
+   user events `message.channels message.groups message.im message.mpim`. Owner pastes **User OAuth Token (xoxp-)** +
+   **App-Level Token (xapp-, connections:write)**. Worker: `apps.connections.open` → WebSocket → conversations channel
+   `slack`; send with `chat.postMessage`; health `auth.test`.
+2. **Messaging the team** from GAC Desk — the owner will explain how later. Don't build yet.
+3. Bot replies: the owner's **n8n WhatsApp bot** answers on the same number, so its replies count as "answered". Option
+   offered (not decided): flag bot replies so the client still shows as waiting.
+4. Outlook / Teams — skipped by owner for now.
 
 ---
 
-## 8. How to run / operate
+## 8. Known issues / owner to-dos
+
+- **Titan mailbox:** login fails (wrong password or app access off) → Settings → Edit.
+- **Gmail:** saved as `jimaesmith9871@gmail.com`, owner wrote `jimmysmith9871@gmail.com`; needs an **App Password** → Settings → Edit.
+- Yusuf's number and the company number → Settings → team numbers.
+- Tunnel URL changes when cloudflared restarts → update PUBLIC_URL, restart, Register both webhooks. Final fix = VM + DuckDNS.
+- Secrets pasted in chat (rotate): WhatsApp gateway API key (in an n8n snippet), Gemini API key (in a curl), owner password (still the `.env` value).
+- The n8n bot once answered a client with Gemini's own "permission to turn on the Shopify app" prompt — that's in n8n, not GAC Desk.
+
+---
+
+## 9. How to run / operate
 
 ```bash
 cd "D:/GetAichatbots_Company/Gac Dev Manager Portal"
-npm run build && npm run start          # http://localhost:3000
+npm run build && npm run start          # http://localhost:3000 (runs in a terminal tab)
 "/c/Program Files (x86)/cloudflared/cloudflared.exe" tunnel --no-autoupdate --url http://localhost:3000   # public URL
 ```
-- Before rebuilding, free port 3000: PowerShell
-  `$p=(Get-NetTCPConnection -LocalPort 3000 -State Listen).OwningProcess; Stop-Process -Id $p -Force`.
-- Test pattern used: log in with curl (`/api/auth/login`, cookie jar), hit `/api/state`, etc. Fake WhatsApp webhook:
-  POST to `/api/webhooks/whatsapp?key=$WA_WEBHOOK_SECRET` with a `message.received` body; **delete test rows afterwards**.
-- Bash heredoc/`node -e` string replacement with backticks/`${}` got mangled several times — **use the Edit/Write tools for
-  code changes**, not shell string surgery.
-- `.env` parsing in shell: names are case-sensitive (owner once wrote `Database_password`).
+- **Build first, then restart** (≈1 s downtime). Check a build without touching the live one:
+  `NEXT_DIST_DIR=.next-test npx next build` (`next build` catches type errors `tsc --noEmit` sometimes misses).
+  A side-by-side test server: `.claude/launch.json` "test-build" (port 3100, `DISABLE_WORKER=1`).
+- API errors return **500, never 502**: Cloudflare replaces 502/503/504 with its own HTML page.
+- Test pattern: log in with curl (`/api/auth/login`, cookie jar). Temporary logins use `@example.invalid` and are deleted after.
+- Use the Edit/Write tools for code changes, not shell string surgery.
 
 ---
 
-## 9. Next steps (in order)
+## 10. Next steps (in order)
 
-1. Wire §6.1–6.6 (APIs + UI), type-check, build, test, commit.
-2. Build Slack (§6.7); give the owner the manifest link; owner pastes xoxp + xapp tokens; test receive + send.
-3. Owner fixes Titan + Gmail credentials in Settings → test reading and sending (send a test only with owner's OK).
-4. Ask the owner before pushing to GitHub; push `c9bfb72` + new commits.
-5. Deploy to the Google VM (owner provides VM IP + DuckDNS subdomain), set PUBLIC_URL to the domain, register both
-   webhooks (WhatsApp, ClickUp), switch Whisper to `whisper-base`.
-6. Later: Outlook/Teams via Azure, GAC tracking app driving timers, code-QA pipeline (Semgrep/Gitleaks/Trivy/AI review).
+1. Owner decides on the 3 ClickUp time entries + 23 local timer rows from the incident (§6).
+2. Test-send a WhatsApp message to the owner's own number (with OK) → check ticks, reply-quote, @mention.
+3. Build Slack (§7.1); owner pastes xoxp + xapp tokens.
+4. Owner fixes Titan + Gmail in Settings → Edit.
+5. Owner gives the tracking-portal APIs → wire breaks into timers → owner approves → switch timers on (§6).
+6. Ask before pushing to GitHub; then deploy to the Google VM (VM IP + DuckDNS), PUBLIC_URL, re-register webhooks, `whisper-base`.

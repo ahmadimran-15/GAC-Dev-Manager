@@ -22,6 +22,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     } else return NextResponse.json({ error: "Nothing to save" }, { status: 400 });
     return NextResponse.json(await getEstimate(id));
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 502 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }
 }

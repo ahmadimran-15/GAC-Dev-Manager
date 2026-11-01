@@ -55,12 +55,14 @@ export interface LiveState {
 
 export async function api<T = Record<string, unknown>>(url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const data = await res.json().catch(() => ({}));
+  const data = await res.json().catch(() => null);
   if (res.status === 401) {
     location.href = "/login";
     throw new Error("Signed out");
   }
-  if (!res.ok) throw new Error(data.error ?? "Something went wrong");
+  // A page instead of JSON = the server was restarting or the tunnel couldn't reach it
+  if (!data) throw new Error(res.ok ? "Unexpected answer from the server" : `The server didn't answer (${res.status}). It may be restarting; try again in a few seconds.`);
+  if (!res.ok) throw new Error(data.error ?? `Something went wrong (${res.status})`);
   return data as T;
 }
 

@@ -137,6 +137,7 @@ export interface Task {
   spentMin: number;
   estimateMin: number | null;
   url?: string;
+  priority?: "urgent" | "high" | "normal" | "low" | null;
   dueAt?: number | null; // ms, for on-time stats
   doneAt?: number | null;
 }

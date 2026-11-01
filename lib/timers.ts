@@ -1,4 +1,4 @@
-import { all, get, run, uid } from "@/lib/db";
+import { all, get, kvGet, kvSet, run, uid } from "@/lib/db";
 import { clickupMe, markInProgress, pushTimeEntry } from "@/lib/clickup";
 
 // Time tracking owned by the dashboard: every start and stop is stamped by the server clock, so
@@ -44,18 +44,69 @@ export async function stopPersonTimers(person: string) {
   for (const t of await all<Timer>("select * from timers where person = ? and ended_at is null", person)) await stopTimer(t.id);
 }
 
-export async function startTimer(t: { taskId: string; taskTitle: string; project?: string | null; person: string; by: string }) {
-  await stopPersonTimers(t.person);
+// Manual start (button): one running timer per person, and the task moves to "in progress" in ClickUp.
+// Status-driven start (fromStatus): the task is already in progress; other tasks keep running.
+// Master switch (Team page): off = every running timer stops and nothing starts one
+export const timersEnabled = async () => (await kvGet("timers_on")) !== "0";
+export async function setTimersEnabled(on: boolean) {
+  await kvSet("timers_on", on ? "1" : "0");
+  if (!on) for (const t of await runningTimers()) await stopTimer(t.id);
+  // Turning back on: remember today's statuses so only changes from now on start clocks
+  else await kvSet("status_seen", "{}");
+}
+
+export async function startTimer(t: { taskId: string; taskTitle: string; project?: string | null; person: string; by: string; fromStatus?: boolean }) {
+  if (!(await timersEnabled())) throw new Error("Timers are switched off (Team page → Timers).");
+  if (!t.fromStatus) await stopPersonTimers(t.person);
   const id = uid("t_");
   await run(
     "insert into timers (id, task_id, task_title, project, person, started_at, started_by) values (?,?,?,?,?,?,?)",
     id, t.taskId, t.taskTitle, t.project ?? null, t.person, Date.now(), t.by,
   );
-  // Starting work on an untouched task moves it to "in progress" in ClickUp
-  markInProgress(t.taskId)
-    .then((m) => m && logStatus({ taskId: t.taskId, title: m.title, person: t.person, from: m.from, to: m.to, source: "timer" }))
-    .catch(() => {});
+  if (!t.fromStatus)
+    markInProgress(t.taskId)
+      .then((m) => m && logStatus({ taskId: t.taskId, title: m.title, person: t.person, from: m.from, to: m.to, source: "timer" }))
+      .catch(() => {});
   return id;
+}
+
+// ---------- Timers follow the ClickUp status ----------
+// "in progress" or "revision" = the clock runs for the assignee; any other status pauses it;
+// complete/closed stops it for good (the task's total is what was tracked).
+export const ACTIVE_STATUS = /progress|revision/;
+
+let syncing = false;
+export async function syncStatusTimers(tasks: { id: string; title: string; project: string; assignee: string; status: string }[]) {
+  if (syncing || !(await timersEnabled())) return { started: 0, stopped: 0 };
+  syncing = true;
+  try {
+    const seen = JSON.parse((await kvGet("status_seen")) ?? "{}") as Record<string, string>;
+    const running = await runningTimers();
+    let started = 0;
+    let stopped = 0;
+    for (const t of tasks) {
+      const changed = seen[t.id] !== t.status; // only act on a change, so a manual pause/start sticks
+      seen[t.id] = t.status;
+      if (!changed) continue;
+      const mine = running.filter((r) => r.task_id === t.id);
+      if (ACTIVE_STATUS.test(t.status) && t.assignee !== "Unassigned") {
+        if (!mine.length) {
+          await startTimer({ taskId: t.id, taskTitle: t.title, project: t.project, person: t.assignee, by: "ClickUp status", fromStatus: true });
+          started++;
+        }
+      } else if (mine.length) {
+        for (const r of mine) await stopTimer(r.id);
+        stopped++;
+      }
+    }
+    // A task that left the current projects (moved, archived, deleted) can't keep a clock running
+    const ids = new Set(tasks.map((t) => t.id));
+    if (tasks.length) for (const r of running) if (!ids.has(r.task_id)) (await stopTimer(r.id), stopped++);
+    await kvSet("status_seen", JSON.stringify(seen));
+    return { started, stopped };
+  } finally {
+    syncing = false;
+  }
 }
 
 // Tracked minutes per task (running timers count up to now)

@@ -13,6 +13,6 @@ export async function POST() {
     const r = await ensureClickupWebhook(true);
     return NextResponse.json({ ok: true, endpoint: r.endpoint, id: r.id, signed: !!r.secret });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "ClickUp failed" }, { status: 502 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "ClickUp failed" }, { status: 500 });
   }
 }

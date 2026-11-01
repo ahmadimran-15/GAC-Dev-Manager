@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { board } from "@/lib/clickup";
 import { estimatesMap } from "@/lib/estimates";
-import { minutesByPerson, minutesByTask, recentStatusChanges, runningTimers } from "@/lib/timers";
+import { minutesByPerson, minutesByTask, recentStatusChanges, runningTimers, timersEnabled } from "@/lib/timers";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +27,7 @@ function startOfWeek() {
 // ClickUp board plus our own data: timers, your estimates (owner only), status changes, performance.
 export async function GET(req: Request) {
   const force = new URL(req.url).searchParams.has("refresh");
-  const [b, tracked, running, estimates, changes, today, week] = await Promise.all([
+  const [b, tracked, running, estimates, changes, today, week, timersOn] = await Promise.all([
     board(force),
     minutesByTask(),
     runningTimers(),
@@ -35,6 +35,7 @@ export async function GET(req: Request) {
     recentStatusChanges(20),
     minutesByPerson(startOfToday()),
     minutesByPerson(startOfWeek()),
+    timersEnabled(),
   ]);
   const weekStart = startOfWeek();
   const performance = b.team.map((person) => {
@@ -56,5 +57,5 @@ export async function GET(req: Request) {
       onTime: withDue.length ? { tasks: withDue.length, rate: withDue.filter((t) => t.doneAt! <= endOfDay(t.dueAt!)).length / withDue.length } : null,
     };
   });
-  return NextResponse.json({ ...b, now: Date.now(), tracked, running, estimates, changes, performance });
+  return NextResponse.json({ ...b, now: Date.now(), tracked, running, estimates, changes, performance, timersOn });
 }

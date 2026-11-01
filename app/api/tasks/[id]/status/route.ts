@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { setTaskStatus, taskStatuses } from "@/lib/clickup";
-import { logStatus, runningTimers, statusHistory, stopTimer } from "@/lib/timers";
+import { board, setTaskStatus, taskStatuses } from "@/lib/clickup";
+import { logStatus, runningTimers, statusHistory, stopTimer, syncStatusTimers } from "@/lib/timers";
 import { currentUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     const [s, history] = await Promise.all([taskStatuses(id), statusHistory(id)]);
     return NextResponse.json({ ...s, history });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "ClickUp failed" }, { status: 502 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "ClickUp failed" }, { status: 500 });
   }
 }
 
@@ -32,8 +32,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (type === "closed" || type === "done" || /complete|done|closed/.test(status)) {
       for (const t of await runningTimers()) if (t.task_id === id) await stopTimer(t.id);
     }
+    // The timer follows the new status (in progress / revision runs, anything else pauses)
+    await syncStatusTimers((await board(true)).tasks).catch(() => {});
     return NextResponse.json({ ok: true, from: s.current, to: status });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "ClickUp failed" }, { status: 502 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "ClickUp failed" }, { status: 500 });
   }
 }

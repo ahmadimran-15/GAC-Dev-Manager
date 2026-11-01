@@ -355,6 +355,24 @@ export function startWorker() {
   };
   setTimeout(() => watchSessions().catch((e) => log("backfill-error", String(e))), 30_000);
   setInterval(() => syncDelivery().catch((e) => log("delivery-error", String(e))), 120_000);
+
+  // Timers follow ClickUp statuses (in progress / revision = running), checked every 2 minutes on top of the
+  // webhook; open tasks without an estimate get Gemini's (strict) projection every 10 minutes.
+  const statusTimers = async () => {
+    const { board } = await import("@/lib/clickup");
+    const b = await board();
+    if (b.source !== "clickup" || b.error) return;
+    const r = await (await import("@/lib/timers")).syncStatusTimers(b.tasks);
+    if (r.started || r.stopped) log("status-timers", r);
+  };
+  setTimeout(() => statusTimers().catch((e) => log("status-timer-error", String(e))), 25_000);
+  setInterval(() => statusTimers().catch((e) => log("status-timer-error", String(e))), 120_000);
+  const estimates = async () => {
+    const r = await (await import("@/lib/estimates")).estimateMissing();
+    if (r.estimated) log("estimates", r);
+  };
+  setTimeout(() => estimates().catch((e) => log("estimate-error", String(e))), 60_000);
+  setInterval(() => estimates().catch((e) => log("estimate-error", String(e))), 10 * 60_000);
   setInterval(() => watchSessions().catch((e) => log("backfill-error", String(e))), 120_000);
 
   // After a restart, draft replies for anyone still waiting without one

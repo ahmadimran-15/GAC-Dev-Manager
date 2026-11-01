@@ -43,6 +43,6 @@ export async function POST(req: Request) {
     const conv = cmd.conversation_id ? convs.find((c) => c.id === cmd.conversation_id) : undefined;
     return NextResponse.json({ ...cmd, warning, conversation: conv ? { id: conv.id, name: conv.name, channel: conv.channel } : null });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Assistant failed" }, { status: 502 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Assistant failed" }, { status: 500 });
   }
 }

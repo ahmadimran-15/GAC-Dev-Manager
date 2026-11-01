@@ -9,6 +9,6 @@ export async function POST(req: Request) {
   try {
     return NextResponse.json(await sendToTarget({ channel: b.channel, from: b.from, to: b.to, toName: b.toName, subject: b.subject, text: String(b.text).trim() }));
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Send failed" }, { status: 502 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Send failed" }, { status: 500 });
   }
 }

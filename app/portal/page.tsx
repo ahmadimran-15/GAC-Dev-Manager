@@ -23,6 +23,7 @@ interface Info {
   mine: { id: string; text: string; project: string | null; status: string; created_at: number; conv_name: string | null }[];
   tasks: PTask[];
   running: { id: string; task_id: string; task_title: string; started_at: number } | null;
+  timersOn: boolean;
 }
 
 const when = (t: number) => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -152,9 +153,11 @@ export default function Portal() {
                       </span>
                     </div>
                   </div>
-                  <button className={`btn btn-sm ${on ? "!border-[var(--green)] !text-[var(--green)]" : ""}`} disabled={timerBusy} onClick={() => timer(on ? { action: "stop" } : { action: "start", taskId: t.id })}>
-                    {on ? <Pause size={12} /> : <Play size={12} />} {on ? "Pause" : "Start"}
-                  </button>
+                  {(info.timersOn || on) && (
+                    <button className={`btn btn-sm ${on ? "!border-[var(--green)] !text-[var(--green)]" : ""}`} disabled={timerBusy} onClick={() => timer(on ? { action: "stop" } : { action: "start", taskId: t.id })}>
+                      {on ? <Pause size={12} /> : <Play size={12} />} {on ? "Pause" : "Start"}
+                    </button>
+                  )}
                 </div>
               );
             })}

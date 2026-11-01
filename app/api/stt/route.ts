@@ -12,6 +12,6 @@ export async function POST(req: Request) {
     const t = await whisper(Buffer.from(await file.arrayBuffer()), file.type || "audio/webm", lang);
     return NextResponse.json({ text: t.text, language: t.language });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Transcription failed" }, { status: 502 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Transcription failed" }, { status: 500 });
   }
 }

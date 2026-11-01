@@ -17,6 +17,6 @@ export async function GET(req: Request) {
     const hits = q ? list.filter((t) => t.name.toLowerCase().includes(q) || (digits.length >= 3 && (t.number ?? t.id).includes(digits))) : list;
     return NextResponse.json({ total: list.length, results: hits.slice(0, 60) });
   } catch (e) {
-    return NextResponse.json({ error: `Couldn't load from WhatsApp: ${e instanceof Error ? e.message : e}` }, { status: 502 });
+    return NextResponse.json({ error: `Couldn't load from WhatsApp: ${e instanceof Error ? e.message : e}` }, { status: 500 });
   }
 }

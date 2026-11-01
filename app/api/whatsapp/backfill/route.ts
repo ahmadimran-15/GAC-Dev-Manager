@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     try {
       return NextResponse.json(await backfillWhatsApp({ days, full }));
     } catch (e) {
-      return NextResponse.json({ error: e instanceof Error ? e.message : "Import failed" }, { status: 502 });
+      return NextResponse.json({ error: e instanceof Error ? e.message : "Import failed" }, { status: 500 });
     }
   }
   backfillWhatsApp({ days, full }).catch((e) => logEvent("backfill-error", String(e)).catch(() => {}));

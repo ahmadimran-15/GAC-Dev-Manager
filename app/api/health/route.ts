@@ -25,6 +25,6 @@ export async function POST(req: Request) {
     if (action === "wa-qr") return NextResponse.json({ qr: await sessionQr(a) });
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 502 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }
 }

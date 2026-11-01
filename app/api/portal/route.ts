@@ -4,7 +4,7 @@ import { currentUser } from "@/lib/auth";
 import { addDraft } from "@/lib/store";
 import { board } from "@/lib/clickup";
 import { getUser, updateUser } from "@/lib/users";
-import { minutesByTask, runningTimers, startTimer, stopTimer } from "@/lib/timers";
+import { minutesByTask, runningTimers, startTimer, stopTimer, timersEnabled } from "@/lib/timers";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ const RATE_LIMIT = 30; // client updates per hour per person
 export async function GET() {
   const me = await currentUser();
   if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  const [b, clients, mine, user, running, tracked] = await Promise.all([
+  const [b, clients, mine, user, running, tracked, timersOn] = await Promise.all([
     board(),
     all<{ id: string; name: string; project: string | null; channel: string }>("select id, name, project, channel from conversations where demo = 0 order by name"),
     all<{ id: string; text: string; project: string | null; status: string; created_at: number; conv_name: string | null }>(
@@ -26,6 +26,7 @@ export async function GET() {
     getUser(me.id),
     runningTimers(),
     minutesByTask(),
+    timersEnabled(),
   ]);
   const cu = user?.clickupName ?? null;
   const tasks = cu
@@ -41,6 +42,7 @@ export async function GET() {
     mine: mine.map((d) => ({ ...d, created_at: Number(d.created_at), conv_name: d.conv_name ? d.conv_name.split(" ")[0] : null })),
     tasks,
     running: cu ? (running.find((r) => r.person === cu) ?? null) : null,
+    timersOn,
   });
 }
 
@@ -68,8 +70,11 @@ export async function POST(req: Request) {
     }
     const t = (await board()).tasks.find((x) => x.id === b.taskId);
     if (!t || t.assignee !== cu) return NextResponse.json({ error: "That task isn't assigned to you" }, { status: 403 });
-    const id = await startTimer({ taskId: t.id, taskTitle: t.title, project: t.project, person: cu, by: me.name });
-    return NextResponse.json({ ok: true, id });
+    try {
+      return NextResponse.json({ ok: true, id: await startTimer({ taskId: t.id, taskTitle: t.title, project: t.project, person: cu, by: me.name }) });
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 400 });
+    }
   }
 
   const text = String(b.text ?? "").trim();

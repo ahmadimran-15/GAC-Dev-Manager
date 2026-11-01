@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { get, kvGet, kvSet, logEvent } from "@/lib/db";
 import { board, invalidateBoard } from "@/lib/clickup";
-import { logStatus, runningTimers, stopTimer } from "@/lib/timers";
+import { logStatus, runningTimers, stopTimer, syncStatusTimers } from "@/lib/timers";
 
 // ClickUp pushes task changes here (registered automatically, signed with X-Signature).
 // Status changes are stamped with our server time; finishing a task stops its running timer.
@@ -39,6 +39,13 @@ export async function POST(req: Request) {
     if (to && (/complete|done|closed/.test(to) || h?.after?.type === "closed" || h?.after?.type === "done")) {
       for (const t of await runningTimers()) if (t.task_id === body.task_id) await stopTimer(t.id);
     }
+    // In progress / revision starts the clock, anything else pauses it (in the background: reads the fresh board)
+    if (to)
+      board(true)
+        .then(async (b) => {
+          if (b.source === "clickup" && !b.error) await syncStatusTimers(b.tasks);
+        })
+        .catch(() => {});
   }
   return NextResponse.json({ ok: true });
 }

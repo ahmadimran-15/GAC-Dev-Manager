@@ -28,24 +28,37 @@ async function clientMessage(prompt: string, session: string) {
 export const aiConfigured = () => !!(process.env.GEMINI_BASE_URL && process.env.GEMINI_API_KEY);
 export const transcriptionConfigured = () => whisperConfigured() || !!process.env.GOOGLE_AI_API_KEY;
 
-export async function chat(prompt: string, session = "portal") {
+// Every call reuses ONE session (GEMINI_SESSION_ID): the server opens a new Gemini chat for each new session id
+// and rate-limits that, so per-feature ids made calls fail. The prompt PREFIX makes each answer stand alone.
+// Calls are queued so two prompts never land in that one chat at the same time.
+let queue: Promise<unknown> = Promise.resolve();
+export function chat(prompt: string, _purpose = "portal"): Promise<string> {
+  const next = queue.then(() => ask(prompt));
+  queue = next.catch(() => {});
+  return next;
+}
+
+async function ask(prompt: string) {
   const { GEMINI_BASE_URL, GEMINI_API_KEY, GEMINI_MODEL, GEMINI_SESSION_ID } = process.env;
   if (!GEMINI_BASE_URL || !GEMINI_API_KEY) throw new Error("Gemini is not configured in .env");
   const res = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${GEMINI_API_KEY}`, "X-Session-Id": `${GEMINI_SESSION_ID ?? "gac"}-${session}` },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${GEMINI_API_KEY}`, "X-Session-Id": GEMINI_SESSION_ID || "gac-desk" },
     // Cutting text to a length can split an emoji in half; the Gemini server rejects those broken characters
     body: JSON.stringify({ model: GEMINI_MODEL, messages: [{ role: "user", content: (PREFIX + prompt).replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "") }] }),
     signal: AbortSignal.timeout(90_000),
   });
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.error?.message ?? `Gemini error ${res.status}`);
-  return String(data?.choices?.[0]?.message?.content ?? "").trim();
+  if (!res.ok) throw new Error(`Gemini: ${data?.error?.message ?? data?.detail ?? `error ${res.status}`}`);
+  const text = String(data?.choices?.[0]?.message?.content ?? "").trim();
+  if (!text) throw new Error("Gemini returned an empty answer (it may be busy or rate-limited). Try again in a moment.");
+  return text;
 }
 
 export function parseJson<T>(text: string): T {
   const s = text.indexOf("{");
   const e = text.lastIndexOf("}");
+  if (s < 0 || e <= s) throw new Error("Gemini didn't answer in the expected format. Try again.");
   return JSON.parse(text.slice(s, e + 1)) as T;
 }
 
