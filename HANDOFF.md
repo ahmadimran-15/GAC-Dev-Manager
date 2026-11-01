@@ -186,7 +186,7 @@ What exists (`lib/timers.ts`):
 Incident on 2026-11-02: before the switch existed, status sync auto-started 23 timers (~45 min total). Timers were
 switched off; the 23 local rows (`timers.started_by = 'ClickUp status'`) and **3 ClickUp time entries** (2 min each,
 description "GAC Desk timer", on the owner's tasks MJP Electrical landing page / MJP Dashboard / Dev team ClickUp
-cleanup) still exist — deleting them was blocked by the permission check and is waiting for the owner's OK.
+cleanup) were deleted on 2026-11-02 with the owner's OK (ClickUp entries + local rows).
 
 ---
 
@@ -234,7 +234,7 @@ npm run build && npm run start          # http://localhost:3000 (runs in a termi
 
 ## 10. Next steps (in order)
 
-1. Owner decides on the 3 ClickUp time entries + 23 local timer rows from the incident (§6).
+1. (Done) Incident timers removed from ClickUp and the database.
 2. Test-send a WhatsApp message to the owner's own number (with OK) → check ticks, reply-quote, @mention.
 3. Build Slack (§7.1); owner pastes xoxp + xapp tokens.
 4. Owner fixes Titan + Gmail in Settings → Edit.
