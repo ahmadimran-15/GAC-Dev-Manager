@@ -26,15 +26,73 @@ const pick = async (id?: string | null) => (id ? await getAccount(id) : null) ??
 
 const chatIdFor = (to: string) => (to.includes("@") ? to : `${to.replace(/[^\d]/g, "")}@c.us`);
 
-export async function sendWhatsApp(to: string, text: string, accountId?: string | null): Promise<{ ok: boolean; simulated?: boolean; id?: string; error?: string }> {
+// opts.quotedMessageId turns the send into a reply to that message; opts.mentions = ["923…@c.us"]
+// (the text must contain "@923…" for each). A quote the gateway can't resolve is retried without it.
+export async function sendWhatsApp(
+  to: string,
+  text: string,
+  accountId?: string | null,
+  opts: { quotedMessageId?: string | null; mentions?: string[] } = {},
+): Promise<{ ok: boolean; simulated?: boolean; id?: string; error?: string; quoted?: boolean }> {
   const a = await pick(accountId);
   if (!a) return { ok: true, simulated: true };
-  try {
+  const body = { chatId: chatIdFor(to), text, ...(opts.mentions?.length ? { mentions: opts.mentions } : {}) };
+  const sendOnce = async (quoted?: string | null) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const r = await wa<any>(a, "/messages/send-text", { method: "POST", body: JSON.stringify({ chatId: chatIdFor(to), text }) });
-    return { ok: true, id: String(r?.messageId ?? r?.waMessageId ?? r?.id ?? "") || undefined };
+    const r = await wa<any>(a, "/messages/send-text", { method: "POST", body: JSON.stringify(quoted ? { ...body, quotedMessageId: quoted } : body) });
+    return String(r?.messageId ?? r?.waMessageId ?? r?.id ?? "") || undefined;
+  };
+  try {
+    if (opts.quotedMessageId) {
+      try {
+        return { ok: true, id: await sendOnce(opts.quotedMessageId), quoted: true };
+      } catch {
+        /* quote not resolvable on this engine: send it as a normal message */
+      }
+    }
+    return { ok: true, id: await sendOnce(), quoted: false };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "WhatsApp send failed" };
+  }
+}
+
+// "@TuLab please check" → "@92300… please check" + mentions, using saved contacts and team numbers.
+// In a group only its members are considered when the gateway lists them.
+export async function resolveMentions(text: string, people: { name: string; number: string }[]) {
+  if (!text.includes("@")) return { text, mentions: [] as string[] };
+  const mentions = new Set<string>();
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let out = text;
+  // Longest names first so "@Muhammad Ali" wins over "@Muhammad"; then unique first names
+  const firsts = new Map<string, { name: string; number: string }[]>();
+  for (const p of people) {
+    const f = p.name.split(/\s+/)[0].toLowerCase();
+    firsts.set(f, [...(firsts.get(f) ?? []), p]);
+  }
+  const candidates = [
+    ...[...people].sort((x, y) => y.name.length - x.name.length).map((p) => ({ token: p.name, number: p.number })),
+    ...[...firsts].filter(([, l]) => l.length === 1).map(([f, l]) => ({ token: f, number: l[0].number })),
+  ].filter((c) => c.token.length >= 3 && c.number);
+  for (const c of candidates) {
+    const re = new RegExp(`@${esc(c.token)}(?![\\p{L}\\p{N}])`, "giu");
+    if (re.test(out)) {
+      out = out.replace(re, `@${c.number}`);
+      mentions.add(`${c.number}@c.us`);
+    }
+  }
+  return { text: out, mentions: [...mentions] };
+}
+
+// Phone numbers of a group's members (for mentions); empty if the gateway can't tell
+export async function groupMembers(a: AccountWithSecret, groupId: string): Promise<string[]> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const g = await wa<any>(a, `/groups/${encodeURIComponent(groupId)}`);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const list: any[] = g?.participants ?? g?.data?.participants ?? [];
+    return list.map((p) => String(p?.phone ?? p?.number ?? p?.id?._serialized ?? p?.id ?? "").split("@")[0].replace(/[^\d]/g, "")).filter(Boolean);
+  } catch {
+    return [];
   }
 }
 
@@ -57,7 +115,7 @@ export async function listSessions(baseUrl: string, apiKey: string) {
 
 // Registers (or updates) this dashboard's webhook on a session. Other webhooks (e.g. n8n) are left alone.
 export async function registerWebhook(a: AccountWithSecret, url: string) {
-  const body = { url, events: ["message.received", "message.sent"], secret: process.env.WA_WEBHOOK_SECRET || undefined, retryCount: 3 };
+  const body = { url, events: ["message.received", "message.sent", "message.ack", "message.failed"], secret: process.env.WA_WEBHOOK_SECRET || undefined, retryCount: 3 };
   const list = await wa<{ id: string; url: string }[]>(a, "/webhooks");
   const mine = list.find((w) => w.url.includes("/api/webhooks/whatsapp"));
   if (mine) return wa(a, `/webhooks/${mine.id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -80,6 +138,7 @@ export interface Incoming {
   sessionId: string | null;
   isGroup: boolean;
   author: string; // who wrote it (in a group: the member)
+  senderId: string; // the writer's WhatsApp id (123@c.us, or a hidden 123@lid in some groups)
   fromMe: boolean;
   phone: string; // the client's number (for your own messages: who you wrote to)
   chatId: string;
@@ -110,7 +169,8 @@ export function parseIncoming(body: any): Incoming | null {
     id: String(m?.id?._serialized ?? m?.id ?? m?.waMessageId ?? `${chatId}-${ts}`),
     sessionId: body?.sessionId ?? d?.sessionId ?? m?.sessionId ?? null,
     isGroup,
-    author: String(m?.pushName ?? m?.notifyName ?? m?.senderName ?? m?.contact?.pushname ?? m?.author ?? ""),
+    author: String(m?.pushName ?? m?.notifyName ?? m?.senderName ?? m?.contact?.pushName ?? m?.contact?.pushname ?? m?.author ?? ""),
+    senderId: fromMe ? "" : String((isGroup ? m?.author : m?.from) ?? ""),
     fromMe,
     phone,
     chatId,
@@ -119,6 +179,120 @@ export function parseIncoming(body: any): Incoming | null {
     kind,
     at: ts ? (ts < 1e12 ? ts * 1000 : ts) : Date.now(),
   };
+}
+
+// Phone number (digits) behind a sender id. Group senders can be hidden "@lid" ids; the gateway
+// resolves those best-effort. Cached, since the same people write all day.
+const phoneCache = new Map<string, string>();
+export async function senderPhone(a: AccountWithSecret | null, id: string) {
+  if (!id) return "";
+  if (!id.endsWith("@lid")) return id.split("@")[0].replace(/[^\d]/g, "");
+  const hit = phoneCache.get(id);
+  if (hit !== undefined) return hit;
+  let phone = "";
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = a ? await wa<any>(a, `/contacts/${encodeURIComponent(id)}/phone`) : null;
+    phone = String(r?.phone ?? r?.number ?? r?.data?.phone ?? "").replace(/[^\d]/g, "");
+  } catch {
+    /* unknown */
+  }
+  phoneCache.set(id, phone);
+  return phone;
+}
+
+// ---------- History (the gateway keeps every message it has seen) ----------
+
+export interface ChatInfo {
+  id: string;
+  name: string;
+  isGroup: boolean;
+  kind: string;
+  at: number; // last activity (ms)
+}
+
+export async function listChats(a: AccountWithSecret): Promise<ChatInfo[]> {
+  const out: ChatInfo[] = [];
+  for (let offset = 0; offset < 5000; offset += 500) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const page = await wa<any>(a, `/chats?limit=500&offset=${offset}`);
+    const list = Array.isArray(page) ? page : (page?.data ?? []);
+    for (const c of list) {
+      const id = String(c.id?._serialized ?? c.id);
+      const ts = Number(c.timestamp ?? 0);
+      out.push({ id, name: String(c.name ?? ""), isGroup: !!c.isGroup || id.endsWith("@g.us"), kind: String(c.kind ?? ""), at: ts < 1e12 ? ts * 1000 : ts });
+    }
+    if (list.length < 500) break;
+  }
+  return out;
+}
+
+// Every message the gateway stored since a moment, all chats, oldest first, in the webhook's shape.
+// Walks newest → oldest with the keyset cursor (the gateway returns at most 100 per page).
+export async function messagesSince(a: AccountWithSecret, since: number, onPage?: (n: number) => void): Promise<Incoming[]> {
+  const out: Incoming[] = [];
+  let after = "";
+  for (let page = 0; page < 2000; page++) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = await wa<any>(a, `/messages?limit=100&inlineMedia=false${after ? `&after=${encodeURIComponent(after)}` : ""}`);
+    const list = Array.isArray(r) ? r : (r?.messages ?? r?.data ?? []);
+    let older = false;
+    for (const m of list) {
+      const ts = Number(m.timestamp ?? 0) * (Number(m.timestamp) < 1e12 ? 1000 : 1);
+      if (ts < since) {
+        older = true;
+        continue;
+      }
+      const inc = parseIncoming({
+        event: m.direction === "outgoing" ? "message.sent" : "message.received",
+        sessionId: a.config.sessionId,
+        data: { ...m, id: m.waMessageId ?? m.id, fromMe: m.direction === "outgoing", isGroup: String(m.chatId).endsWith("@g.us") },
+      });
+      if (inc) out.push(inc);
+    }
+    onPage?.(out.length);
+    if (older || !list.length) break;
+    after = String(list[list.length - 1].id);
+  }
+  return out.reverse();
+}
+
+// ---------- Delivery ticks: sent → delivered → read ----------
+
+export type Delivery = "sent" | "delivered" | "read" | "failed";
+const RANK: Record<string, number> = { pending: 0, sent: 1, delivered: 2, read: 3, played: 3, failed: 9 };
+
+// The bare WhatsApp id ("3EB0…") inside any id form ("true_123@c.us_3EB0…")
+export const bareId = (id: string) => String(id ?? "").split("_").pop() ?? "";
+
+// A message.ack / message.failed webhook → { id, status }, or null for anything else
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function parseAck(body: any): { id: string; status: Delivery } | null {
+  const event: string = body?.event ?? "";
+  if (event !== "message.ack" && event !== "message.failed") return null;
+  const d = body?.data ?? body?.payload ?? {};
+  const m = d?.message ?? d;
+  const id = String(m?.id?._serialized ?? m?.id ?? m?.messageId ?? m?.waMessageId ?? "");
+  if (!id) return null;
+  if (event === "message.failed") return { id, status: "failed" };
+  // Engines report either a name (sent/delivered/read/played) or a number (1 sent, 2 delivered, 3 read, 4 played)
+  const raw = String(m?.status ?? m?.ackName ?? d?.ackName ?? m?.ack ?? d?.ack ?? "").toLowerCase();
+  const n = Number(raw);
+  const status: Delivery | null = /read|play/.test(raw) || n >= 3 ? "read" : /deliver|device/.test(raw) || n === 2 ? "delivered" : /sent|server/.test(raw) || n === 1 ? "sent" : /fail|error/.test(raw) || n < 0 ? "failed" : null;
+  return status ? { id, status } : null;
+}
+
+// Only moves forward (a late "delivered" never overwrites "read")
+export const isNewer = (current: string | null, next: string) =>
+  next === "failed" ? current !== "read" && current !== "delivered" && current !== "failed" : current !== "failed" && (RANK[next] ?? 0) > (RANK[current ?? ""] ?? 0);
+
+// Current status of recent messages in one chat, from the gateway's store (fallback when an ack event was missed)
+export async function chatStatuses(a: AccountWithSecret, chatId: string, limit = 40) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const r = await wa<any>(a, `/messages?chatId=${encodeURIComponent(chatId)}&limit=${limit}&inlineMedia=false`);
+  const list = Array.isArray(r) ? r : (r?.messages ?? r?.data ?? []);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return list.filter((m: any) => m.direction === "outgoing").map((m: any) => ({ id: bareId(String(m.waMessageId ?? m.id)), status: String(m.status ?? "") }));
 }
 
 export const accountForSession = async (sessionId: string | null) => {

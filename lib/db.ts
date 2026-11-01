@@ -41,6 +41,9 @@ create table if not exists conversations (
   suggestion_for text,
   reminded_at ${big},
   remind_after integer,
+  internal integer not null default 0,
+  context text,
+  context_at ${big},
   demo integer not null default 0,
   created_at ${big} not null,
   unique (channel, external_id, account)
@@ -208,6 +211,9 @@ const SQLITE_MIGRATIONS: [table: string, column: string, type: string][] = [
   ["drafts", "sent_to", "text"],
   ["users", "clickup_name", "text"],
   ["conversations", "remind_after", "integer"],
+  ["conversations", "internal", "integer not null default 0"],
+  ["conversations", "context", "text"],
+  ["conversations", "context_at", "integer"],
 ];
 // Same for Postgres databases created before them
 const PG_MIGRATIONS = [
@@ -215,6 +221,9 @@ const PG_MIGRATIONS = [
   "alter table drafts add column if not exists sent_to text",
   "alter table users add column if not exists clickup_name text",
   "alter table conversations add column if not exists remind_after integer",
+  "alter table conversations add column if not exists internal integer not null default 0",
+  "alter table conversations add column if not exists context text",
+  "alter table conversations add column if not exists context_at bigint",
 ];
 
 const g = globalThis as unknown as { __gacDriver?: Promise<Driver>; __gacSeeded?: boolean };

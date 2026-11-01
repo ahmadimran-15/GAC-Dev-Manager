@@ -45,10 +45,18 @@ export default function TaskDrawer({
   async function draft() {
     setBusy(true);
     try {
-      const { ticket } = await api<{ ticket: { title: string; description: string; checklist: string[]; priority: string } }>("/api/ai", { mode: "ticket", messages, instructions, project });
+      const { ticket } = await api<{ ticket: { title: string; description: string; checklist: string[]; priority: string; project?: string | null; assignee?: string | null } }>("/api/ai", {
+        mode: "ticket",
+        messages,
+        instructions,
+        project,
+      });
       setTitle(ticket.title);
       setDescription([ticket.description, ...(ticket.checklist?.length ? ["", ...ticket.checklist.map((c) => `- [ ] ${c}`)] : [])].join("\n"));
       setPriority(ticket.priority ?? "normal");
+      // Where it goes and who does it, when your instructions said so
+      if (ticket.project) setProject(ticket.project);
+      if (ticket.assignee) setAssignee(ticket.assignee);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Gemini failed", "error");
     } finally {
@@ -101,7 +109,7 @@ export default function TaskDrawer({
                 dir="auto"
                 rows={3}
                 className="w-full resize-none rounded-xl bg-transparent px-3 pt-2.5 text-[14px] outline-none placeholder:text-[var(--muted)]"
-                placeholder="e.g. one bug task, high priority, give it to TuLab, ask the client for a screen recording"
+                placeholder="e.g. one bug task in Internal Tasks, high priority, assign to Muhammad Ahmad"
                 value={voice.interim ? `${instructions} ${voice.interim}` : instructions}
                 onChange={(e) => setInstructions(e.target.value)}
               />
@@ -137,7 +145,9 @@ export default function TaskDrawer({
               <span className="eyebrow">Assignee</span>
               <select className="input mt-1" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
                 <option value="">Unassigned</option>
-                {board?.team.map((t) => <option key={t}>{t}</option>)}
+                {[...new Set([...(board?.team ?? []), ...(assignee ? [assignee] : [])])].map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
               </select>
             </label>
             <label className="block">

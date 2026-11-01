@@ -1,14 +1,14 @@
 "use client";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CheckCheck, ListPlus, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
+import { Check, CheckCheck, ListPlus, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
 import Composer from "@/components/Composer";
 import type { ConvSummary, Message } from "@/lib/store";
 import { api, useLive, type DraftRow } from "@/components/Live";
 import { Avatar, CHANNELS, Channel, Pill, STATUS_TONE, Waiting, ago } from "@/components/ui";
 import DraftCard from "@/components/DraftCard";
 import TaskDrawer, { type BoardLite } from "@/components/TaskDrawer";
-import { ackText } from "@/components/WaitingCard";
+import { ReplyBox, ackText } from "@/components/WaitingCard";
 import { ListSkeleton, ThreadSkeleton } from "@/components/Skeleton";
 import FromPicker from "@/components/FromPicker";
 import { accountOf } from "@/components/Live";
@@ -21,6 +21,18 @@ interface Detail {
 }
 
 const REMIND = [null, 5, 15, 30, 60] as const;
+
+// WhatsApp ticks for our messages: ✓ sent, ✓✓ delivered, blue ✓✓ read, red ! failed
+function Ticks({ status }: { status: string | null }) {
+  if (status === "failed") return <span className="ml-1 font-semibold text-[var(--red)]" title="Not delivered">!</span>;
+  if (!status || !["sent", "delivered", "read"].includes(status)) return null;
+  const Icon = status === "sent" ? Check : CheckCheck;
+  return (
+    <span className="ml-1 inline-flex translate-y-[2px]" title={status === "read" ? "Read" : status === "delivered" ? "Delivered" : "Sent"}>
+      <Icon size={13} strokeWidth={2.4} style={{ color: status === "read" ? "#34b7f1" : "var(--muted)" }} />
+    </span>
+  );
+}
 
 const dayLabel = (t: number) => {
   const d = new Date(t);
@@ -37,6 +49,9 @@ function Inbox() {
   const router = useRouter();
   const { state, refresh, send, toast } = useLive();
   const [filter, setFilter] = useState<"all" | "waiting">("all");
+  const [channel, setChannel] = useState("all");
+  const [contextBusy, setContextBusy] = useState(false);
+  const contextAsked = useRef<Set<string>>(new Set());
   const [q, setQ] = useState("");
   const [detail, setDetail] = useState<Detail | null>(null);
   const [reply, setReply] = useState("");
@@ -49,9 +64,15 @@ function Inbox() {
   const [board, setBoard] = useState<BoardLite | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
+  const isGroup = (c: ConvSummary) => c.channel === "whatsapp" && c.externalId.endsWith("@g.us");
+  // "whatsapp", "groups", "email", "team", or one mailbox / number (an account key)
+  const inChannel = (c: ConvSummary) =>
+    channel === "all" ||
+    (channel === "groups" ? isGroup(c) : channel === "team" ? c.internal : channel === "whatsapp" || channel === "email" ? c.channel === channel : c.account.toLowerCase() === channel.toLowerCase());
   const convs = (state?.conversations ?? []).filter(
-    (c) => (filter === "all" || c.waiting) && (!q || `${c.name} ${c.company ?? ""} ${c.project ?? ""}`.toLowerCase().includes(q.toLowerCase())),
+    (c) => (filter === "all" || c.waiting) && inChannel(c) && (!q || `${c.name} ${c.company ?? ""} ${c.project ?? ""} ${c.externalId}`.toLowerCase().includes(q.toLowerCase())),
   );
+  const mailboxes = (state?.accounts ?? []).filter((a) => a.kind === "email");
   const id = params.get("c") ?? state?.conversations[0]?.id ?? null;
   const now = state?.now ?? Date.now();
 
@@ -140,6 +161,26 @@ function Inbox() {
 
   const text = (m: Message) => m.text || m.transcript || "";
 
+  async function summarize(convId: string) {
+    setContextBusy(true);
+    try {
+      await api(`/api/conversations/${convId}`, { action: "context" });
+      await Promise.all([load(), refresh()]);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Gemini failed", "error");
+    } finally {
+      setContextBusy(false);
+    }
+  }
+
+  // Write the context note when a chat is opened and the note is missing or older than the last message
+  const stale = !!c && !!c.last && (!c.contextAt || c.contextAt < c.last.at);
+  useEffect(() => {
+    if (!c || !stale || !state?.connections.gemini || contextAsked.current.has(c.id)) return;
+    contextAsked.current.add(c.id);
+    summarize(c.id);
+  }, [c?.id, stale]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="mx-auto max-w-[1240px] px-6 py-6">
       <div className="card grid h-[calc(100vh-104px)] min-h-[560px] grid-cols-[320px_minmax(0,1fr)] overflow-hidden">
@@ -155,12 +196,24 @@ function Inbox() {
                 <PenSquare size={15} />
               </button>
             </div>
-            <div className="flex gap-1">
+            <div className="flex items-center gap-1">
               {(["all", "waiting"] as const).map((f) => (
                 <button key={f} onClick={() => setFilter(f)} className={`rounded-full px-3 py-1 text-[12.5px] ${filter === f ? "bg-[#171717] text-white" : "text-[var(--ink-2)] hover:bg-[var(--hover)]"}`}>
                   {f === "all" ? "All" : `Waiting · ${state?.stats.waiting ?? 0}`}
                 </button>
               ))}
+              <select className="ml-auto max-w-[130px] rounded-md bg-transparent text-[12.5px] text-[var(--ink-2)] outline-none hover:bg-[var(--hover)]" value={channel} onChange={(e) => setChannel(e.target.value)}>
+                <option value="all">All channels</option>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="groups">WhatsApp groups</option>
+                <option value="email">Email</option>
+                {mailboxes.map((m) => (
+                  <option key={m.id} value={m.address}>
+                    Email · {m.address}
+                  </option>
+                ))}
+                <option value="team">Not clients (team, personal)</option>
+              </select>
             </div>
           </div>
           <div className="scroll min-h-0 flex-1 px-2 pb-2">
@@ -179,10 +232,15 @@ function Inbox() {
                   <div className="flex items-center gap-1.5">
                     <Channel c={x.channel} withLabel={false} />
                     <span className={`truncate text-[13px] ${x.waiting ? "text-[var(--ink)]" : "text-[var(--muted)]"}`}>
-                      {x.last?.direction === "out" ? "You: " : ""}
+                      {x.last?.direction === "out" ? (x.repliedBy ? `${x.repliedBy.name}: ` : "You: ") : ""}
                       {x.last?.text}
                     </span>
                   </div>
+                  {(x.repliedBy || x.internal) && (
+                    <div className="mt-1">
+                      {x.internal ? <Pill>Not a client</Pill> : <Pill tone="blue">Replied by {x.repliedBy!.name}</Pill>}
+                    </div>
+                  )}
                 </div>
               </button>
             ))}
@@ -251,6 +309,13 @@ function Inbox() {
               <button className={`btn btn-sm ${selecting ? "btn-dark" : ""}`} onClick={startTask}>
                 <ListPlus size={14} /> {selecting ? `Create task from ${sel.size}` : "Create task"}
               </button>
+              <button
+                className="btn btn-sm btn-ghost"
+                title={c.internal ? "Count this chat as a client again" : "Personal or team chat: never waiting, no reminders"}
+                onClick={() => action({ action: "internal", value: !c.internal }, c.internal ? "Back to client chats" : "Marked as not a client")}
+              >
+                {c.internal ? "It's a client" : "Not a client"}
+              </button>
               {c.status === "handled" ? (
                 <button className="btn btn-sm btn-ghost" onClick={() => action({ action: "reopen" })}>
                   Reopen
@@ -260,6 +325,24 @@ function Inbox() {
                   <CheckCheck size={14} /> Handled
                 </button>
               )}
+            </div>
+
+            {/* What's going on in this chat, written by Gemini */}
+            <div className="flex items-start gap-3 border-b border-[var(--line)] bg-[var(--bg)]/60 px-6 py-3">
+              <Sparkles size={14} className="mt-0.5 shrink-0 text-[var(--muted)]" />
+              <div className="min-w-0 flex-1">
+                <div className="mb-0.5 flex items-center gap-2 text-[11.5px] font-medium uppercase tracking-wide text-[var(--muted)]">
+                  Context
+                  {c.repliedBy && <Pill tone="blue">Reply sent by {c.repliedBy.name} · {ago(c.repliedBy.at, now)}</Pill>}
+                  {c.contextAt && <span className="normal-case tracking-normal">· {ago(c.contextAt, now)}</span>}
+                </div>
+                <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--ink-2)]">
+                  {contextBusy && !c.context ? "Reading the conversation…" : (c.context ?? "No summary yet.")}
+                </p>
+              </div>
+              <button className="btn btn-ghost btn-sm !px-2" title="Summarise again" disabled={contextBusy} onClick={() => summarize(c.id)}>
+                <RotateCw size={13} className={contextBusy ? "animate-spin" : ""} />
+              </button>
             </div>
 
             {selecting && (
@@ -311,6 +394,7 @@ function Inbox() {
                           {m.via ? `${mine ? "from" : "to"} ${m.via} · ` : ""}
                           {time(m.created_at)}
                           {m.status === "simulated" ? " · test mode" : ""}
+                          {mine && c.channel === "whatsapp" && <Ticks status={m.status} />}
                         </div>
                       </div>
                     </div>
@@ -343,17 +427,18 @@ function Inbox() {
               <div className="mb-2 flex items-center justify-between">
                 <FromPicker channel={c.channel} account={c.account} value={from} onChange={setFrom} />
               </div>
-              <div className="rounded-2xl border border-[var(--line-2)] bg-white focus-within:border-[#a8a8a2]">
-                <textarea
-                  dir="auto"
-                  rows={2}
-                  className="w-full resize-none rounded-2xl bg-transparent px-4 pt-3 text-[14px] leading-relaxed outline-none placeholder:text-[var(--muted)]"
-                  placeholder={`Reply on ${CHANNELS[c.channel]?.label ?? c.channel}…`}
-                  value={reply}
-                  onChange={(e) => setReply(e.target.value)}
-                  onKeyDown={(e) => (e.ctrlKey || e.metaKey) && e.key === "Enter" && doSend(reply)}
-                />
-                <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
+              <ReplyBox
+                convId={c.id}
+                value={reply}
+                onChange={setReply}
+                busy={busy}
+                setBusy={setBusy}
+                rows={2}
+                onSubmit={() => doSend(reply)}
+                placeholder={`Reply on ${CHANNELS[c.channel]?.label ?? c.channel}… or type / speak an instruction (e.g. “say Friday, tag @TuLab”) and press Generate`}
+              />
+              <div>
+                <div className="flex items-center gap-1.5 pt-2">
                   <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => doSend(ackText(c.name), true)} title={ackText(c.name)}>
                     Acknowledge
                   </button>

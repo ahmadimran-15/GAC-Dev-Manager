@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Loader2, PlayCircle, RotateCw, X } from "lucide-react";
+import { ExternalLink, Loader2, PlayCircle, RotateCw, Sparkles, X } from "lucide-react";
 import type { Board } from "@/lib/clickup";
 import { api } from "@/components/Live";
 import { Avatar, Pill, ago } from "@/components/ui";
@@ -74,6 +74,20 @@ function TaskPanel({ id, data, now, onClose, reload }: { id: string; data: TeamD
   const running = data.running.find((r) => r.task_id === id);
   const refresh = () => (reload(), loadExtra());
 
+  const [ctx, setCtx] = useState<{ summary: string; looms: string[] } | null>(null);
+  const [ctxBusy, setCtxBusy] = useState(false);
+  useEffect(() => setCtx(null), [id]);
+  async function getContext() {
+    setCtxBusy(true);
+    try {
+      setCtx(await api<{ summary: string; looms: string[] }>(`/api/tasks/${id}/context`, {}));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Gemini failed");
+    } finally {
+      setCtxBusy(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-[60] flex justify-end bg-black/15" onClick={onClose}>
       <aside className="slide-in flex h-full w-[520px] max-w-full flex-col border-l border-[var(--line)] bg-white" onClick={(e) => e.stopPropagation()}>
@@ -82,12 +96,32 @@ function TaskPanel({ id, data, now, onClose, reload }: { id: string; data: TeamD
             <div className="text-[16px] font-semibold leading-snug">{d?.title ?? "Loading…"}</div>
             {d && <div className="mt-1 text-[12.5px] text-[var(--muted)]">{d.project} · {d.stage} · {d.assignee}</div>}
           </div>
-          <button className="btn btn-ghost !h-8 !w-8 shrink-0 !p-0" onClick={onClose}>
-            <X size={16} />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button className="btn btn-sm" disabled={!d || ctxBusy} onClick={getContext} title="Summary of the task and its comments, with Loom links">
+              <Sparkles size={12} className={ctxBusy ? "animate-pulse" : ""} /> {ctxBusy ? "Reading…" : "Get context"}
+            </button>
+            <button className="btn btn-ghost !h-8 !w-8 !p-0" onClick={onClose}>
+              <X size={16} />
+            </button>
+          </div>
         </div>
         <div className="scroll flex-1 space-y-6 px-6 pb-8">
           {err && <p className="text-[var(--red)]">{err}</p>}
+          {ctx && (
+            <div className="rounded-xl bg-[var(--bg)] px-4 py-3">
+              <div className="eyebrow mb-1.5">Context</div>
+              <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-[var(--ink-2)]">{ctx.summary}</p>
+              {ctx.looms.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {ctx.looms.map((l) => (
+                    <a key={l} href={l} target="_blank" className="flex items-center gap-2 text-[13px] text-[#625df5] hover:underline">
+                      <PlayCircle size={14} className="shrink-0" /> <span className="truncate">{l}</span>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {!d && !err && <Loader2 className="animate-spin text-[var(--muted)]" size={18} />}
           {d && (
             <>

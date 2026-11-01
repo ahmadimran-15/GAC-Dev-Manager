@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getConversation, getMessages, summarize, updateConversation } from "@/lib/store";
 import { all } from "@/lib/db";
 import { sendToConversation } from "@/lib/inbound";
-import { suggestReply } from "@/lib/ai";
+import { generateReply, suggestReply, summarizeConversation } from "@/lib/ai";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +53,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         await updateConversation(id, { remind_after: m });
         return NextResponse.json({ ok: true });
       }
+      case "internal":
+        // "Not a client": personal or team chats stay in the inbox but never wait or remind
+        await updateConversation(id, { internal: body.value ? 1 : 0 });
+        return NextResponse.json({ ok: true });
+      case "generate":
+        return NextResponse.json({ text: await generateReply(id, String(body.input ?? "")) });
+      case "context":
+        return NextResponse.json({ context: await summarizeConversation(id) });
       case "suggest":
         return NextResponse.json({ suggestion: await suggestReply(id) });
       default:

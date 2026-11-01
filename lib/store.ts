@@ -14,6 +14,9 @@ export interface Conversation {
   suggestion_for: string | null;
   reminded_at: number | null;
   remind_after: number | null; // minutes before reminders start for this client (null = default)
+  internal: number; // a chat with someone on our side (never "waiting")
+  context: string | null; // AI summary of what's going on in this chat
+  context_at: number | null;
   demo: number;
   created_at: number;
 }
@@ -51,6 +54,10 @@ export interface ConvSummary {
   acknowledged: boolean;
   suggestion: string | null;
   remindAfter: number | null;
+  internal: boolean;
+  repliedBy: { name: string; at: number } | null; // last reply came from a teammate, not you
+  context: string | null;
+  contextAt: number | null;
   last: { text: string; kind: string; direction: string; at: number } | null;
 }
 
@@ -88,6 +95,16 @@ export async function addMessage(m: Partial<Message> & { conv_id: string; direct
   return id;
 }
 
+// Many messages at once (history import). Already-stored ones (same conversation + external id) are skipped.
+const MSG_COLS = ["id", "conv_id", "direction", "kind", "text", "external_id", "sent_by", "status", "via", "created_at"] as const;
+export async function insertMessages(rows: (Partial<Message> & { conv_id: string; direction: "in" | "out"; external_id: string; created_at: number })[]) {
+  for (let i = 0; i < rows.length; i += 200) {
+    const chunk = rows.slice(i, i + 200);
+    const values = chunk.flatMap((m) => [uid("m_"), m.conv_id, m.direction, m.kind ?? "text", m.text ?? null, m.external_id, m.sent_by ?? null, m.status ?? null, m.via ?? null, m.created_at]);
+    await run(`insert into messages (${MSG_COLS.join(", ")}) values ${chunk.map(() => `(${MSG_COLS.map(() => "?").join(",")})`).join(", ")} on conflict do nothing`, ...values);
+  }
+}
+
 export function getMessages(convId: string) {
   return all<Message>("select * from messages where conv_id = ? order by created_at", convId);
 }
@@ -112,19 +129,22 @@ with x as (
 )
 select x.*,
   (select m.ack from messages m where m.conv_id = x.id and m.direction = 'out' order by m.created_at desc limit 1) lo_ack,
+  (select m.sent_by from messages m where m.conv_id = x.id and m.direction = 'out' order by m.created_at desc limit 1) lo_by,
   (select min(m.created_at) from messages m where m.conv_id = x.id and m.direction = 'in' and m.created_at > coalesce(x.lo_t, 0)) pend_t,
   (select count(*) from messages m where m.conv_id = x.id and m.direction = 'in' and m.created_at > coalesce(x.lo_t, 0)) pend_n,
   (select m.id from messages m where m.conv_id = x.id order by m.created_at desc limit 1) last_id
 from x`;
 
 async function summaries(where = "", ...p: unknown[]): Promise<ConvSummary[]> {
-  const rows = await all<Conversation & { lo_ack: number | null; pend_t: number | null; pend_n: number; last_id: string | null }>(SUMMARY_SQL(where), ...p);
+  const rows = await all<Conversation & { lo_ack: number | null; lo_t: number | null; lo_by: string | null; pend_t: number | null; pend_n: number; last_id: string | null }>(SUMMARY_SQL(where), ...p);
   const ids = rows.map((r) => r.last_id).filter(Boolean) as string[];
   const lasts = ids.length ? await all<Message>(`select * from messages where id in (${ids.map(() => "?").join(",")})`, ...ids) : [];
   const byId = new Map(lasts.map((m) => [m.id, m]));
   return rows.map((c) => {
     const last = c.last_id ? byId.get(c.last_id) : undefined;
-    const waiting = c.status !== "handled" && Number(c.pend_n) > 0;
+    const waiting = c.status !== "handled" && !c.internal && Number(c.pend_n) > 0;
+    // "me" = sent here, "phone" = your phone; anything else is a teammate's name or a team portal author
+    const byTeammate = c.lo_by && !["me", "phone"].includes(c.lo_by) ? c.lo_by : null;
     return {
       id: c.id,
       channel: c.channel,
@@ -141,6 +161,10 @@ async function summaries(where = "", ...p: unknown[]): Promise<ConvSummary[]> {
       acknowledged: !waiting && !!c.lo_ack,
       suggestion: waiting ? c.suggestion : null,
       remindAfter: c.remind_after === null || c.remind_after === undefined ? null : Number(c.remind_after),
+      internal: !!c.internal,
+      repliedBy: !waiting && byTeammate && c.lo_t ? { name: byTeammate, at: Number(c.lo_t) } : null,
+      context: c.context ?? null,
+      contextAt: c.context_at ? Number(c.context_at) : null,
       last: last ? { text: msgText(last), kind: last.kind, direction: last.direction, at: Number(last.created_at) } : null,
     };
   });

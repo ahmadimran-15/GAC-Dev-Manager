@@ -1,12 +1,83 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Mic, RotateCw, Sparkles } from "lucide-react";
+import { Loader2, Mic, RotateCw, Sparkles, Square } from "lucide-react";
+import { VOICE_LANGS, useVoice } from "@/lib/use-voice";
 import type { ConvSummary } from "@/lib/store";
 import { accountOf, api, useLive } from "@/components/Live";
 import { Avatar, Channel, Waiting } from "@/components/ui";
 
 export const ackText = (name: string) => `Hi ${name.split(" ")[0]}, we've received your message and we're on it. I'll update you shortly.`;
+
+// The reply text box with voice input and "Generate": whatever is in the box (a draft or an
+// instruction, typed or spoken) is turned into the finished message by Gemini. "@Name" tags people.
+export function ReplyBox({
+  convId,
+  value,
+  onChange,
+  busy,
+  setBusy,
+  placeholder,
+  rows = 3,
+  onSubmit,
+}: {
+  convId: string;
+  value: string;
+  onChange: (v: string) => void;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  placeholder?: string;
+  rows?: number;
+  onSubmit?: () => void;
+}) {
+  const { toast, state } = useLive();
+  const [lang, setLang] = useState("en-US");
+  const latest = useRef(value);
+  latest.current = value;
+  const voice = useVoice((t) => onChange(latest.current ? `${latest.current} ${t}` : t), !!state?.connections.voiceWhisper);
+
+  async function generate() {
+    setBusy(true);
+    try {
+      onChange((await api<{ text: string }>(`/api/conversations/${convId}`, { action: "generate", input: value })).text);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Gemini failed", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-[var(--line-2)] bg-white focus-within:border-[#a8a8a2]">
+      <textarea
+        dir="auto"
+        rows={rows}
+        className="w-full resize-none rounded-xl bg-transparent px-3 pt-2.5 text-[14px] leading-relaxed outline-none placeholder:text-[var(--muted)]"
+        placeholder={placeholder}
+        value={voice.interim ? `${value} ${voice.interim}` : value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => onSubmit && (e.ctrlKey || e.metaKey) && e.key === "Enter" && onSubmit()}
+      />
+      <div className="flex items-center gap-1 px-2 pb-2">
+        <button
+          className={`grid h-7 w-7 place-items-center rounded-full ${voice.listening ? "pulse-ring bg-[var(--red)] text-white" : "bg-[#171717] text-white"}`}
+          title={voice.listening ? "Stop" : "Speak"}
+          onClick={() => (voice.listening ? voice.stop() : voice.start(lang))}
+        >
+          {voice.listening ? <Square size={10} fill="currentColor" /> : <Mic size={13} />}
+        </button>
+        {VOICE_LANGS.map((l) => (
+          <button key={l.code} onClick={() => setLang(l.code)} className={`rounded-full px-2 text-[11.5px] ${lang === l.code ? "bg-[var(--hover)] font-medium" : "text-[var(--muted)]"}`}>
+            {l.label}
+          </button>
+        ))}
+        <button className="btn btn-sm ml-auto" disabled={busy || !state?.connections.gemini} onClick={generate} title="Turn what's in the box into the finished reply">
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Generate
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // A client waiting for a reply, with Gemini's suggested answer ready to send.
 export default function WaitingCard({ c, now, compact = false, onDone }: { c: ConvSummary; now: number; compact?: boolean; onDone?: () => void }) {
@@ -71,19 +142,20 @@ export default function WaitingCard({ c, now, compact = false, onDone }: { c: Co
           <div className="mt-3.5 rounded-xl bg-[var(--bg)] px-3.5 py-3">
             <div className="mb-1 flex items-center justify-between">
               <span className="eyebrow inline-flex items-center gap-1.5">
-                <Sparkles size={12} /> Suggested reply
+                <Sparkles size={12} /> {c.suggestion && text === c.suggestion ? "Suggested reply" : "Your reply"}
               </span>
               <button className="btn btn-ghost btn-sm !h-6 !px-1.5" title="Write another suggestion" disabled={busy} onClick={regenerate}>
                 <RotateCw size={12} className={busy ? "animate-spin" : ""} />
               </button>
             </div>
-            {editing ? (
-              <textarea autoFocus className="input min-h-[72px] resize-none text-[14px] leading-relaxed" value={text} onChange={(e) => setText(e.target.value)} />
-            ) : (
-              <p onClick={() => setEditing(true)} className="cursor-text text-[14px] leading-relaxed text-[var(--ink-2)]" title="Click to edit">
-                {text || (state?.connections.gemini ? <span className="text-[var(--muted)]">Writing a suggestion…</span> : <span className="text-[var(--muted)]">Click to write a reply</span>)}
-              </p>
-            )}
+            <ReplyBox
+              convId={c.id}
+              value={text}
+              onChange={(v) => (setText(v), setEditing(true))}
+              busy={busy}
+              setBusy={setBusy}
+              placeholder={state?.connections.gemini && !c.suggestion ? "Writing a suggestion… or type / speak what to say, then Generate" : "Type or speak a reply, or an instruction like “tell him Friday, tag @TuLab”, then Generate"}
+            />
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">

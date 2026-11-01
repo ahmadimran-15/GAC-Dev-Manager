@@ -6,6 +6,7 @@ import AccountsManager from "@/components/AccountsManager";
 import HealthPanel from "@/components/HealthPanel";
 import LoginsManager from "@/components/LoginsManager";
 import GroupsManager from "@/components/GroupsManager";
+import TeamNumbersManager from "@/components/TeamNumbersManager";
 import { ago } from "@/components/ui";
 
 function Row({ name, ok, detail, children }: { name: string; ok: boolean | null; detail: React.ReactNode; children?: React.ReactNode }) {
@@ -174,6 +175,9 @@ export default function Settings() {
           {k?.clickup && <ClickUpWebhook publicUrl={k.publicUrl} />}
         </Row>
       </div>
+
+      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Our side: team numbers</h2>
+      <TeamNumbersManager />
 
       <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">WhatsApp groups in the inbox</h2>
       <GroupsManager />
