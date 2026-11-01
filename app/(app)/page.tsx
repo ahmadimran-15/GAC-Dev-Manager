@@ -1,0 +1,137 @@
+"use client";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { ArrowRight, CheckCheck } from "lucide-react";
+import type { Board } from "@/lib/clickup";
+import { api, useLive } from "@/components/Live";
+import { Avatar, Channel, Section, ago, duration, mins } from "@/components/ui";
+import WaitingCard from "@/components/WaitingCard";
+import DraftCard from "@/components/DraftCard";
+import { OverviewSkeleton } from "@/components/Skeleton";
+
+function Stat({ label, value, hint, alert }: { label: string; value: React.ReactNode; hint?: string; alert?: boolean }) {
+  return (
+    <div className="px-6 py-5 first:pl-0">
+      <div className="eyebrow">{label}</div>
+      <div className={`tnum mt-1 text-[28px] font-semibold leading-tight tracking-tight ${alert ? "text-[var(--red)]" : ""}`}>{value}</div>
+      {hint && <div className="mt-0.5 text-[12.5px] text-[var(--muted)]">{hint}</div>}
+    </div>
+  );
+}
+
+export default function Overview() {
+  const { state } = useLive();
+  const [board, setBoard] = useState<Board | null>(null);
+  const [date, setDate] = useState("");
+
+  useEffect(() => {
+    api<Board>("/api/team").then(setBoard).catch(() => {});
+    setDate(new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }));
+  }, []);
+
+  if (!state) return <OverviewSkeleton />;
+
+  const now = state.now;
+  const waiting = state.conversations.filter((c) => c.waiting);
+  const answered = state.conversations.filter((c) => !c.waiting).slice(0, 6);
+  const open = board?.tasks.filter((t) => !/complete|done|closed/.test(t.status)) ?? [];
+  const active = open.filter((t) => /progress|revision/.test(t.status));
+  const blocked = open.filter((t) => /block/.test(t.status));
+  const oldest = waiting[0];
+
+  return (
+    <div className="fade-in mx-auto max-w-[1240px] px-6 pb-20 pt-10">
+      <div className="eyebrow">{date || " "}</div>
+      <h1 className="mt-1 text-[30px] font-semibold tracking-tight">
+        {waiting.length ? `${waiting.length} client${waiting.length > 1 ? "s are" : " is"} waiting for you.` : "You're all caught up."}
+      </h1>
+      <p className="mt-1 text-[15px] text-[var(--ink-2)]">
+        {oldest?.waitingSince
+          ? `${oldest.name} has waited longest (${duration(mins(oldest.waitingSince, now))}). Replies are already drafted below.`
+          : "No client is waiting for a reply right now."}
+      </p>
+
+      <div className="mt-8 grid grid-cols-2 divide-x divide-[var(--line)] border-y border-[var(--line)] md:grid-cols-4">
+        <Stat label="Waiting for a reply" value={waiting.length} alert={waiting.some((c) => c.waitingSince && mins(c.waitingSince, now) >= 30)} hint={waiting.length ? `${waiting.filter((c) => c.waitingSince && mins(c.waitingSince, now) >= 30).length} over 30 minutes` : "Nobody"} />
+        <Stat label="First reply today" value={state.stats.firstReplyAvg !== null ? `${state.stats.firstReplyAvg}m` : "—"} hint={`${state.stats.repliesToday} conversation${state.stats.repliesToday === 1 ? "" : "s"} answered`} />
+        <Stat label="Tasks in progress" value={board ? active.length : "—"} hint={board ? `${blocked.length} blocked · ${open.length} open` : ""} />
+        <Stat label="Team drafts" value={state.drafts.length} hint="waiting for your approval" />
+      </div>
+
+      <div className="mt-10 grid gap-12 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <Section title="Waiting for you" count={waiting.length} right={<Link href="/inbox" className="text-[13px] text-[var(--ink-2)] hover:text-[var(--ink)]">Open inbox →</Link>}>
+          <div className="space-y-3">
+            {waiting.map((c) => (
+              <WaitingCard key={c.id} c={c} now={now} />
+            ))}
+            {!waiting.length && (
+              <div className="card flex flex-col items-center py-14 text-center text-[var(--muted)]">
+                <CheckCheck size={26} className="mb-2 text-[var(--green)]" />
+                Every client has an answer.
+              </div>
+            )}
+          </div>
+        </Section>
+
+        <aside className="space-y-10">
+          <Section title="From your team" count={state.drafts.length}>
+            <div className="card divide-y divide-[var(--line)] px-4">
+              {state.drafts.map((d) => (
+                <DraftCard key={d.id} d={d} now={now} />
+              ))}
+              {!state.drafts.length && <div className="py-6 text-center text-[13px] text-[var(--muted)]">No drafts waiting.</div>}
+            </div>
+          </Section>
+
+          <Section title="Working now" right={<Link href="/team" className="text-[13px] text-[var(--ink-2)] hover:text-[var(--ink)]">Team →</Link>}>
+            <div className="space-y-3">
+              {(board?.team ?? []).map((name) => {
+                const mine = active.filter((t) => t.assignee === name);
+                const isBlocked = blocked.some((t) => t.assignee === name);
+                return (
+                  <div key={name} className="flex items-start gap-3">
+                    <Avatar name={name} size={28} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 text-[13.5px] font-medium">
+                        {name}
+                        <span className="dot" style={{ background: mine.length ? "var(--green)" : isBlocked ? "var(--red)" : "#cfcfca" }} />
+                      </div>
+                      <div className="truncate text-[12.5px] text-[var(--muted)]">{mine[0] ? `${mine[0].title} · ${mine[0].project}` : isBlocked ? "Blocked" : "Nothing in progress"}</div>
+                    </div>
+                  </div>
+                );
+              })}
+              {!board &&
+                [0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="skel h-7 w-7 !rounded-full" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="skel h-[11px] w-1/2" />
+                      <div className="skel h-[10px] w-4/5" />
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </Section>
+
+          <Section title="Recently answered">
+            <div className="space-y-1">
+              {answered.map((c) => (
+                <Link key={c.id} href={`/inbox?c=${c.id}`} className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white">
+                  <Avatar name={c.name} size={24} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px]">
+                      {c.name} <span className="text-[var(--muted)]">· {c.last ? ago(c.last.at, now) : ""}</span>
+                    </div>
+                  </div>
+                  <Channel c={c.channel} withLabel={false} />
+                  <ArrowRight size={13} className="text-[var(--muted)]" />
+                </Link>
+              ))}
+            </div>
+          </Section>
+        </aside>
+      </div>
+    </div>
+  );
+}

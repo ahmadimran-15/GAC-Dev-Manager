@@ -1,0 +1,115 @@
+"use client";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import type { ConvSummary } from "@/lib/store";
+
+export interface DraftRow {
+  id: string;
+  conv_id: string | null;
+  author: string;
+  text: string;
+  created_at: number;
+  conv_name: string | null;
+  channel: string | null;
+}
+
+export interface LiveState {
+  now: number;
+  conversations: ConvSummary[];
+  drafts: DraftRow[];
+  stats: { waiting: number; firstReplyAvg: number | null; repliesToday: number };
+  connections: {
+    gemini: boolean;
+    transcription: boolean;
+    whisper: boolean;
+    whatsapp: boolean;
+    whatsappSession: { status: string; phone: string; pushName: string } | null;
+    whatsappLastEvent: number | null;
+    whatsappSecret: boolean;
+    reminderWhatsApp: boolean;
+    publicUrl: string | null;
+    clickup: boolean;
+    email: { label: string; user: string; status: { ok: boolean; at: number; error?: string } | null }[];
+  };
+  hasDemo: boolean;
+}
+
+export async function api<T = Record<string, unknown>>(url: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    location.href = "/login";
+    throw new Error("Signed out");
+  }
+  if (!res.ok) throw new Error(data.error ?? "Something went wrong");
+  return data as T;
+}
+
+interface Ctx {
+  state: LiveState | null;
+  refresh: () => Promise<void>;
+  toast: (text: string, tone?: "ok" | "error") => void;
+  send: (convId: string, text: string, ack?: boolean) => Promise<boolean>;
+  openAssistant: () => void;
+  assistantOpen: boolean;
+  setAssistantOpen: (v: boolean) => void;
+}
+
+const LiveCtx = createContext<Ctx | null>(null);
+export const useLive = () => {
+  const c = useContext(LiveCtx);
+  if (!c) throw new Error("useLive outside provider");
+  return c;
+};
+
+export function LiveProvider({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<LiveState | null>(null);
+  const [toastMsg, setToastMsg] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setState(await api<LiveState>("/api/state"));
+    } catch {
+      /* keep last state */
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 8000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  const toast = useCallback((text: string, tone: "ok" | "error" = "ok") => {
+    setToastMsg({ text, tone });
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setToastMsg(null), 3500);
+  }, []);
+
+  const send = useCallback(
+    async (convId: string, text: string, ack = false) => {
+      try {
+        const r = await api<{ simulated: boolean; name: string; channel: string }>(`/api/conversations/${convId}`, { action: "send", text, ack });
+        toast(`${ack ? "Acknowledged" : "Sent to"} ${r.name}${r.simulated ? " (test mode, not delivered)" : ""}`);
+        await refresh();
+        return true;
+      } catch (e) {
+        toast(e instanceof Error ? e.message : "Send failed", "error");
+        return false;
+      }
+    },
+    [refresh, toast],
+  );
+
+  return (
+    <LiveCtx.Provider value={{ state, refresh, toast, send, assistantOpen, setAssistantOpen, openAssistant: () => setAssistantOpen(true) }}>
+      {children}
+      {toastMsg && (
+        <div className={`fade-in fixed bottom-6 left-1/2 z-[80] -translate-x-1/2 rounded-full px-4 py-2 text-[13px] text-white shadow-lg ${toastMsg.tone === "error" ? "bg-[#c7353a]" : "bg-[#171717]"}`}>
+          {toastMsg.text}
+        </div>
+      )}
+    </LiveCtx.Provider>
+  );
+}
