@@ -1,7 +1,8 @@
 import { logEvent, kvSet } from "@/lib/db";
 import { aiConfigured, suggestReply, transcribe, transcriptionConfigured } from "@/lib/ai";
-import { downloadMedia, parseIncoming, sendWhatsApp, waConfigured } from "@/lib/whatsapp";
-import { emailAccounts, pollAccount, sendEmail } from "@/lib/email";
+import { accountForSession, downloadMedia, parseIncoming, sendWhatsApp, waConfigured } from "@/lib/whatsapp";
+import { pollAll, sendEmail } from "@/lib/email";
+import { defaultSender, getAccount } from "@/lib/accounts";
 import { addMessage, findOrCreateConversation, getConversation, getMessages, listConversations, updateConversation, updateMessage } from "@/lib/store";
 
 // ---------- Suggested replies ----------
@@ -29,18 +30,22 @@ export async function handleWhatsApp(body: any) {
   const inc = parseIncoming(body);
   if (!inc) return { ignored: true };
 
+  // Which of our WhatsApp numbers this happened on
+  const acc = accountForSession(inc.sessionId);
+  const account = acc?.id ?? "";
+
   if (inc.fromMe) {
     // You replied from your phone (or the dashboard's own send echoed back): record it once
-    const conv = findOrCreateConversation({ channel: "whatsapp", externalId: inc.phone, name: inc.phone });
+    const conv = findOrCreateConversation({ channel: "whatsapp", externalId: inc.phone, account, name: inc.phone });
     const recent = getMessages(conv.id).slice(-3);
     if (recent.some((m) => m.direction === "out" && m.text === inc.text && Math.abs(m.created_at - inc.at) < 120_000)) return { duplicate: true };
-    addMessage({ conv_id: conv.id, direction: "out", text: inc.text, external_id: inc.id, sent_by: "phone", status: "sent", created_at: inc.at });
+    addMessage({ conv_id: conv.id, direction: "out", text: inc.text, external_id: inc.id, sent_by: "phone", status: "sent", created_at: inc.at, via: acc?.label });
     updateConversation(conv.id, { suggestion: null, suggestion_for: null });
     return { recorded: "outgoing" };
   }
 
-  const conv = findOrCreateConversation({ channel: "whatsapp", externalId: inc.phone, name: inc.name });
-  const id = addMessage({ conv_id: conv.id, direction: "in", kind: inc.kind, text: inc.kind === "voice" ? null : inc.text || null, external_id: inc.id, created_at: inc.at });
+  const conv = findOrCreateConversation({ channel: "whatsapp", externalId: inc.phone, account, name: inc.name });
+  const id = addMessage({ conv_id: conv.id, direction: "in", kind: inc.kind, text: inc.kind === "voice" ? null : inc.text || null, external_id: inc.id, created_at: inc.at, via: acc?.label });
   if (!id) return { duplicate: true };
 
   if (inc.kind === "voice") {
@@ -64,18 +69,24 @@ export async function handleWhatsApp(body: any) {
 
 // ---------- Sending ----------
 
-export async function sendToConversation(convId: string, text: string, opts: { ack?: boolean; by?: string } = {}) {
+// opts.from = the account (mailbox / WhatsApp number) to send from; defaults to the one the client wrote to.
+export async function sendToConversation(convId: string, text: string, opts: { ack?: boolean; by?: string; from?: string | null } = {}) {
   const c = getConversation(convId);
   if (!c) throw new Error("Conversation not found");
   let r: { ok: boolean; simulated?: boolean; id?: string; error?: string };
+  let via: string | null = null;
   if (c.demo) r = { ok: true, simulated: true };
-  else if (c.channel === "whatsapp") r = await sendWhatsApp(c.external_id, text);
-  else if (c.channel === "email") r = await sendEmail(c.account, c.external_id, c.subject, text);
-  else r = { ok: true, simulated: true }; // Slack / Teams / Outlook connect later
+  else if (c.channel === "whatsapp" || c.channel === "email") {
+    const kind = c.channel;
+    const sender = (opts.from ? getAccount(opts.from) : null) ?? defaultSender(kind, c.account);
+    if (!sender) throw new Error(`No ${kind === "email" ? "mailbox" : "WhatsApp number"} is set up for sending. Add one in Settings.`);
+    via = kind === "email" ? sender.address : sender.label;
+    r = kind === "email" ? await sendEmail(sender.id, c.external_id, c.subject, text) : await sendWhatsApp(c.external_id, text, sender.id);
+  } else r = { ok: true, simulated: true }; // Slack / Teams / Outlook connect later
   if (!r.ok) throw new Error(r.error ?? "Send failed");
-  addMessage({ conv_id: convId, direction: "out", text, ack: opts.ack ? 1 : 0, sent_by: opts.by ?? "me", status: r.simulated ? "simulated" : "sent", external_id: r.id ?? null });
+  addMessage({ conv_id: convId, direction: "out", text, ack: opts.ack ? 1 : 0, sent_by: opts.by ?? "me", status: r.simulated ? "simulated" : "sent", external_id: r.id ?? null, via });
   updateConversation(convId, { suggestion: null, suggestion_for: null, reminded_at: null });
-  return { simulated: !!r.simulated, channel: c.channel, name: c.name };
+  return { simulated: !!r.simulated, channel: c.channel, name: c.name, via };
 }
 
 // ---------- Background worker ----------
@@ -90,17 +101,17 @@ async function alertNewEmail(convId: string) {
   await sendWhatsApp(to, `📧 New email (${c.account}) from *${c.name}*\n${c.subject ? `Subject: ${c.subject}\n` : ""}${(last?.text ?? "").slice(0, 300)}${url}`);
 }
 
+let polling = false;
 async function pollEmail() {
-  for (const acc of emailAccounts()) {
-    try {
-      await pollAccount(acc, (convId) => {
-        afterIncoming(convId);
-        alertNewEmail(convId).catch((e) => logEvent("alert-error", String(e)));
-      });
-      kvSet(`email_status_${acc.label}`, JSON.stringify({ ok: true, at: Date.now() }));
-    } catch (e) {
-      kvSet(`email_status_${acc.label}`, JSON.stringify({ ok: false, at: Date.now(), error: e instanceof Error ? e.message : String(e) }));
-    }
+  if (polling) return;
+  polling = true;
+  try {
+    await pollAll((convId) => {
+      afterIncoming(convId);
+      alertNewEmail(convId).catch((e) => logEvent("alert-error", String(e)));
+    });
+  } finally {
+    polling = false;
   }
 }
 
@@ -131,10 +142,9 @@ export function startWorker() {
   if (g.__gacWorker) return;
   g.__gacWorker = true;
 
-  if (emailAccounts().length) {
-    setTimeout(pollEmail, 5_000);
-    setInterval(pollEmail, 60_000);
-  }
+  // Mailboxes can be added any time in Settings, so always keep checking
+  setTimeout(pollEmail, 5_000);
+  setInterval(pollEmail, 60_000);
   setInterval(() => remindOnWhatsApp().catch((e) => logEvent("reminder-error", String(e))), 60_000);
 
   // After a restart, draft replies for anyone still waiting without one

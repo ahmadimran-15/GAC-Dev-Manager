@@ -30,6 +30,7 @@ export interface Message {
   ack: number;
   sent_by: string | null;
   status: string | null;
+  via: string | null; // which of our accounts received or sent it
   created_at: number;
 }
 
@@ -76,8 +77,8 @@ export function addMessage(m: Partial<Message> & { conv_id: string; direction: "
   if (m.external_id && get("select 1 from messages where conv_id = ? and external_id = ?", m.conv_id, m.external_id)) return null;
   const id = m.id ?? uid("m_");
   run(
-    "insert into messages (id, conv_id, direction, kind, text, transcript, media_path, media_mime, external_id, ack, sent_by, status, created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-    id, m.conv_id, m.direction, m.kind ?? "text", m.text, m.transcript, m.media_path, m.media_mime, m.external_id, m.ack ?? 0, m.sent_by, m.status, m.created_at ?? Date.now(),
+    "insert into messages (id, conv_id, direction, kind, text, transcript, media_path, media_mime, external_id, ack, sent_by, status, via, created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    id, m.conv_id, m.direction, m.kind ?? "text", m.text, m.transcript, m.media_path, m.media_mime, m.external_id, m.ack ?? 0, m.sent_by, m.status, m.via, m.created_at ?? Date.now(),
   );
   // A new client message reopens the conversation; any reply clears the reminder clock
   if (m.direction === "in") run("update conversations set status = 'open', reminded_at = null where id = ?", m.conv_id);

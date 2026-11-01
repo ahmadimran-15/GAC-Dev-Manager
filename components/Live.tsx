@@ -12,23 +12,39 @@ export interface DraftRow {
   channel: string | null;
 }
 
+export interface AccountLite {
+  id: string;
+  kind: "email" | "whatsapp";
+  label: string;
+  address: string;
+  provider: string;
+  enabled: boolean;
+  canSend: boolean;
+  status: { ok: boolean; at: number; error?: string } | null;
+}
+
+// The account a conversation came in on (email address or WhatsApp account id)
+export const accountOf = (accounts: AccountLite[] | undefined, key: string | null | undefined) =>
+  key ? accounts?.find((a) => a.id === key || a.address.toLowerCase() === key.toLowerCase()) : undefined;
+
 export interface LiveState {
   now: number;
   conversations: ConvSummary[];
   drafts: DraftRow[];
   stats: { waiting: number; firstReplyAvg: number | null; repliesToday: number };
+  accounts: AccountLite[];
   connections: {
     gemini: boolean;
     transcription: boolean;
     whisper: boolean;
+    stt: string;
+    voiceWhisper: boolean;
     whatsapp: boolean;
-    whatsappSession: { status: string; phone: string; pushName: string } | null;
     whatsappLastEvent: number | null;
     whatsappSecret: boolean;
     reminderWhatsApp: boolean;
     publicUrl: string | null;
     clickup: boolean;
-    email: { label: string; user: string; status: { ok: boolean; at: number; error?: string } | null }[];
   };
   hasDemo: boolean;
 }
@@ -48,7 +64,7 @@ interface Ctx {
   state: LiveState | null;
   refresh: () => Promise<void>;
   toast: (text: string, tone?: "ok" | "error") => void;
-  send: (convId: string, text: string, ack?: boolean) => Promise<boolean>;
+  send: (convId: string, text: string, ack?: boolean, from?: string | null) => Promise<boolean>;
   openAssistant: () => void;
   assistantOpen: boolean;
   setAssistantOpen: (v: boolean) => void;
@@ -88,10 +104,10 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const send = useCallback(
-    async (convId: string, text: string, ack = false) => {
+    async (convId: string, text: string, ack = false, from: string | null = null) => {
       try {
-        const r = await api<{ simulated: boolean; name: string; channel: string }>(`/api/conversations/${convId}`, { action: "send", text, ack });
-        toast(`${ack ? "Acknowledged" : "Sent to"} ${r.name}${r.simulated ? " (test mode, not delivered)" : ""}`);
+        const r = await api<{ simulated: boolean; name: string; channel: string; via: string | null }>(`/api/conversations/${convId}`, { action: "send", text, ack, from });
+        toast(`${ack ? "Acknowledged" : "Sent to"} ${r.name}${r.via ? ` from ${r.via}` : ""}${r.simulated ? " (test mode, not delivered)" : ""}`);
         await refresh();
         return true;
       } catch (e) {

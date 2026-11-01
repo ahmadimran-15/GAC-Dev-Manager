@@ -22,7 +22,7 @@ export default function TaskDrawer({ messages, project: initialProject, board, o
   const [priority, setPriority] = useState("normal");
   const [due, setDue] = useState("");
   const [busy, setBusy] = useState(false);
-  const voice = useVoice((t) => setInstructions((p) => (p ? `${p} ${t}` : t)), !!state?.connections.whisper);
+  const voice = useVoice((t) => setInstructions((p) => (p ? `${p} ${t}` : t)), !!state?.connections.voiceWhisper);
 
   async function draft() {
     setBusy(true);

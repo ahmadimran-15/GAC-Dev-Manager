@@ -2,18 +2,16 @@ import fs from "fs";
 import path from "path";
 import { createHmac, timingSafeEqual } from "crypto";
 import { MEDIA_DIR } from "@/lib/db";
+import { accountsWithSecrets, getAccount, type AccountWithSecret } from "@/lib/accounts";
 
-// ChatSlash / OpenWA self-hosted WhatsApp gateway. Session and key come from .env.
-const BASE = () => (process.env.WA_BASE_URL ?? "").replace(/\/$/, "");
-const SESSION = () => process.env.WA_SESSION_ID ?? "";
-const KEY = () => process.env.WA_API_KEY ?? "";
+// ChatSlash / OpenWA self-hosted WhatsApp gateway. Each WhatsApp number is an account (session) added in Settings.
 
-export const waConfigured = () => !!(BASE() && SESSION() && KEY());
+const base = (a: AccountWithSecret) => (a.config.baseUrl ?? "").replace(/\/$/, "");
 
-async function wa<T>(p: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE()}/api/sessions/${SESSION()}${p}`, {
+async function wa<T>(a: AccountWithSecret, p: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${base(a)}/api/sessions/${a.config.sessionId}${p}`, {
     ...init,
-    headers: { "x-api-key": KEY(), accept: "application/json", "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: { "x-api-key": a.secret, accept: "application/json", "Content-Type": "application/json", ...(init?.headers ?? {}) },
     signal: AbortSignal.timeout(30_000),
     cache: "no-store",
   });
@@ -22,35 +20,48 @@ async function wa<T>(p: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
+export const waAccounts = () => accountsWithSecrets("whatsapp");
+export const waConfigured = () => waAccounts().length > 0;
+const pick = (id?: string | null) => (id ? getAccount(id) : null) ?? waAccounts().find((a) => a.canSend) ?? null;
+
 const chatIdFor = (to: string) => (to.includes("@") ? to : `${to.replace(/[^\d]/g, "")}@c.us`);
 
-export async function sendWhatsApp(to: string, text: string): Promise<{ ok: boolean; simulated?: boolean; id?: string; error?: string }> {
-  if (!waConfigured()) return { ok: true, simulated: true };
+export async function sendWhatsApp(to: string, text: string, accountId?: string | null): Promise<{ ok: boolean; simulated?: boolean; id?: string; error?: string }> {
+  const a = pick(accountId);
+  if (!a) return { ok: true, simulated: true };
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const r = await wa<any>("/messages/send-text", { method: "POST", body: JSON.stringify({ chatId: chatIdFor(to), text }) });
+    const r = await wa<any>(a, "/messages/send-text", { method: "POST", body: JSON.stringify({ chatId: chatIdFor(to), text }) });
     return { ok: true, id: String(r?.messageId ?? r?.waMessageId ?? r?.id ?? "") || undefined };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "WhatsApp send failed" };
   }
 }
 
-export async function sessionStatus() {
-  if (!waConfigured()) return null;
+export async function sessionStatus(a: AccountWithSecret) {
   try {
-    return await wa<{ status: string; phone: string; pushName: string }>("");
+    return await wa<{ status: string; phone: string; pushName: string }>(a, "");
   } catch (e) {
     return { status: "error", phone: "", pushName: e instanceof Error ? e.message : "" };
   }
 }
 
-// Registers (or updates) this dashboard's webhook on the gateway. Other webhooks (e.g. n8n) are left alone.
-export async function registerWebhook(url: string) {
+// Lists the sessions an API key can use, so a number can be picked in Settings.
+export async function listSessions(baseUrl: string, apiKey: string) {
+  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/sessions`, { headers: { "x-api-key": apiKey, accept: "application/json" }, signal: AbortSignal.timeout(30_000), cache: "no-store" });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.message ?? `Gateway error ${res.status}`);
+  const list = Array.isArray(data) ? data : (data?.data ?? data?.sessions ?? []);
+  return list.map((s: { id: string; name?: string; phone?: string; status?: string; pushName?: string }) => ({ id: s.id, name: s.name ?? "", phone: s.phone ?? "", status: s.status ?? "", pushName: s.pushName ?? "" }));
+}
+
+// Registers (or updates) this dashboard's webhook on a session. Other webhooks (e.g. n8n) are left alone.
+export async function registerWebhook(a: AccountWithSecret, url: string) {
   const body = { url, events: ["message.received", "message.sent"], secret: process.env.WA_WEBHOOK_SECRET || undefined, retryCount: 3 };
-  const list = await wa<{ id: string; url: string }[]>("/webhooks");
+  const list = await wa<{ id: string; url: string }[]>(a, "/webhooks");
   const mine = list.find((w) => w.url.includes("/api/webhooks/whatsapp"));
-  if (mine) return wa(`/webhooks/${mine.id}`, { method: "PUT", body: JSON.stringify(body) });
-  return wa("/webhooks", { method: "POST", body: JSON.stringify(body) });
+  if (mine) return wa(a, `/webhooks/${mine.id}`, { method: "PUT", body: JSON.stringify(body) });
+  return wa(a, "/webhooks", { method: "POST", body: JSON.stringify(body) });
 }
 
 // HMAC check of the X-OpenWA-Signature header (sha256=<hex> of the raw body).
@@ -66,6 +77,7 @@ export function verifySignature(raw: string, header: string | null) {
 
 export interface Incoming {
   id: string;
+  sessionId: string | null;
   fromMe: boolean;
   phone: string; // the client's number (for your own messages: who you wrote to)
   chatId: string;
@@ -92,6 +104,7 @@ export function parseIncoming(body: any): Incoming | null {
   const ts = Number(m?.timestamp ?? body?.timestamp ?? 0);
   return {
     id: String(m?.id?._serialized ?? m?.id ?? m?.waMessageId ?? `${chatId}-${ts}`),
+    sessionId: body?.sessionId ?? d?.sessionId ?? m?.sessionId ?? null,
     fromMe,
     phone,
     chatId,
@@ -102,12 +115,15 @@ export function parseIncoming(body: any): Incoming | null {
   };
 }
 
+export const accountForSession = (sessionId: string | null) => waAccounts().find((a) => a.config.sessionId === sessionId) ?? waAccounts()[0] ?? null;
+
 // Voice notes: the gateway stores the media; fetch the bytes and keep a local copy for playback.
 export async function downloadMedia(inc: Incoming): Promise<{ file: string; mime: string; buf: Buffer } | null> {
-  if (!waConfigured()) return null;
+  const a = accountForSession(inc.sessionId);
+  if (!a) return null;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(`${BASE()}/api/sessions/${SESSION()}/messages/${encodeURIComponent(inc.chatId)}/${encodeURIComponent(inc.id)}/media`, {
-      headers: { "x-api-key": KEY() },
+    const res = await fetch(`${base(a)}/api/sessions/${a.config.sessionId}/messages/${encodeURIComponent(inc.chatId)}/${encodeURIComponent(inc.id)}/media`, {
+      headers: { "x-api-key": a.secret },
       signal: AbortSignal.timeout(60_000),
     });
     if (res.ok) {

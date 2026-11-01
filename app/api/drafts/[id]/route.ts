@@ -5,7 +5,7 @@ import { sendToConversation } from "@/lib/inbound";
 // Approve (send from your account) or discard a teammate's draft.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { action, text, conv_id } = await req.json().catch(() => ({}));
+  const { action, text, conv_id, from } = await req.json().catch(() => ({}));
   const d = getDraft(id);
   if (!d || d.status !== "pending") return NextResponse.json({ error: "Draft not found" }, { status: 404 });
   if (action === "discard") {
@@ -15,7 +15,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const target = conv_id || d.conv_id;
   if (!target) return NextResponse.json({ error: "Pick which client this goes to" }, { status: 400 });
   try {
-    const r = await sendToConversation(target, String(text || d.text).trim(), { by: d.author });
+    const r = await sendToConversation(target, String(text || d.text).trim(), { by: d.author, from: from || null });
     setDraftStatus(id, "approved");
     return NextResponse.json(r);
   } catch (e) {

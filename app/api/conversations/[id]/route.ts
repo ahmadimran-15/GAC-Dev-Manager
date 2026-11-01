@@ -25,7 +25,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     switch (body.action) {
       case "send": {
         if (!String(body.text ?? "").trim()) return NextResponse.json({ error: "Empty message" }, { status: 400 });
-        return NextResponse.json(await sendToConversation(id, String(body.text).trim(), { ack: !!body.ack }));
+        return NextResponse.json(await sendToConversation(id, String(body.text).trim(), { ack: !!body.ack, from: body.from || null }));
       }
       case "handled":
         updateConversation(id, { status: "handled" });

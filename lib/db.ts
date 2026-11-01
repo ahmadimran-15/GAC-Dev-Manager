@@ -64,7 +64,23 @@ create table if not exists events (
   created_at integer not null
 );
 create table if not exists kv (k text primary key, v text);
+create table if not exists accounts (
+  id text primary key,
+  kind text not null,
+  label text not null,
+  address text not null,
+  provider text not null,
+  config text not null default '{}',
+  secret text not null,
+  enabled integer not null default 1,
+  can_send integer not null default 1,
+  status text,
+  created_at integer not null
+);
 `;
+
+// Columns added after the first release
+const MIGRATIONS: [table: string, column: string, type: string][] = [["messages", "via", "text"]];
 
 export function db(): DatabaseSync {
   if (g.__gacDb) return g.__gacDb;
@@ -73,6 +89,10 @@ export function db(): DatabaseSync {
   const d = new DatabaseSync(path.join(DATA_DIR, "local.db"));
   d.exec("pragma journal_mode = wal; pragma busy_timeout = 3000;");
   d.exec(SCHEMA);
+  for (const [table, column, type] of MIGRATIONS) {
+    const cols = d.prepare(`pragma table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === column)) d.exec(`alter table ${table} add column ${column} ${type}`);
+  }
   g.__gacDb = d;
   if (process.env.SEED_DEMO !== "0") seedDemo();
   return d;

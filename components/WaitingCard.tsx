@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Mic, RotateCw, Sparkles } from "lucide-react";
 import type { ConvSummary } from "@/lib/store";
-import { api, useLive } from "@/components/Live";
+import { accountOf, api, useLive } from "@/components/Live";
 import { Avatar, Channel, Waiting } from "@/components/ui";
 
 export const ackText = (name: string) => `Hi ${name.split(" ")[0]}, we've received your message and we're on it. I'll update you shortly.`;
@@ -58,7 +58,7 @@ export default function WaitingCard({ c, now, compact = false, onDone }: { c: Co
             {c.waitingSince && <Waiting since={c.waitingSince} now={now} />}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[12.5px] text-[var(--muted)]">
-            <Channel c={c.channel} account={c.account} />
+            <Channel c={c.channel} account={accountOf(state?.accounts, c.account)?.label ?? (c.channel === "email" ? c.account : null)} />
             {c.project && <span>{c.project}</span>}
             {c.unanswered > 1 && <span>{c.unanswered} messages</span>}
           </div>

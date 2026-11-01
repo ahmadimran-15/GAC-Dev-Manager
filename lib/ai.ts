@@ -123,7 +123,14 @@ export async function answerFrom(command: string, source: string, results: strin
 }
 
 export async function transcribe(audio: Buffer, mime: string): Promise<string | null> {
-  if (whisperConfigured()) return whisper(audio, mime);
+  if (whisperConfigured()) {
+    const t = await whisper(audio, mime);
+    if (!t.text) return null;
+    if (t.language === "english" || !aiConfigured()) return t.text;
+    // Urdu / Hindi voice notes: keep the original and add an English translation underneath
+    const english = await chat(`Translate this ${t.language} voice note into natural English. Return only the translation.\n\n${t.text}`, "translate").catch(() => "");
+    return english ? `${t.text}\n\nEnglish: ${english.trim()}` : t.text;
+  }
   const key = process.env.GOOGLE_AI_API_KEY;
   if (!key) return null;
   const model = process.env.GOOGLE_AI_MODEL || "gemini-2.5-flash";

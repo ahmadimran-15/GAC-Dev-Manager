@@ -24,7 +24,7 @@ export async function searchEmail(query: string) {
   const words = query.split(/\s+/).filter((w) => w.length > 2).slice(0, 4);
   const out: string[] = [];
   for (const acc of emailAccounts()) {
-    const client = new ImapFlow({ host: acc.imapHost, port: acc.imapPort, secure: true, auth: { user: acc.user, pass: acc.pass }, logger: false });
+    const client = new ImapFlow({ host: acc.config.imapHost!, port: acc.config.imapPort ?? 993, secure: (acc.config.imapPort ?? 993) === 993, auth: { user: acc.config.username || acc.address, pass: acc.secret }, logger: false });
     try {
       await client.connect();
       const lock = await client.getMailboxLock("INBOX");
@@ -36,7 +36,7 @@ export async function searchEmail(query: string) {
           const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
           if (!msg || !msg.source) continue;
           const mail = await simpleParser(msg.source);
-          out.push(`EMAIL [${acc.label}] from ${mail.from?.text ?? "?"} · ${mail.date?.toLocaleDateString("en-GB") ?? ""} · "${mail.subject ?? ""}"\n${(mail.text ?? "").replace(/\s+/g, " ").slice(0, 700)}`);
+          out.push(`EMAIL [${acc.label} · ${acc.address}] from ${mail.from?.text ?? "?"} · ${mail.date?.toLocaleDateString("en-GB") ?? ""} · "${mail.subject ?? ""}"\n${(mail.text ?? "").replace(/\s+/g, " ").slice(0, 700)}`);
         }
       } finally {
         lock.release();

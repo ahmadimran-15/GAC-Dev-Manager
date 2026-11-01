@@ -57,7 +57,7 @@ export default function Assistant() {
   const [board, setBoard] = useState<{ team: string[]; projects: string[] } | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
-  const voice = useVoice((t) => setText((p) => (p ? `${p} ${t}` : t)), !!state?.connections.whisper);
+  const voice = useVoice((t) => setText((p) => (p ? `${p} ${t}` : t)), !!state?.connections.voiceWhisper);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -246,7 +246,7 @@ export default function Assistant() {
                 {l.label}
               </button>
             ))}
-            <span className="ml-auto text-[11.5px] text-[var(--muted)]">{state?.connections.whisper ? "Whisper" : "Browser"} voice · Enter to send · Esc to close</span>
+            <span className="ml-auto text-[11.5px] text-[var(--muted)]">{state?.connections.voiceWhisper ? "Whisper" : "Browser"} voice · Enter to send · Esc to close</span>
           </div>
         </div>
       </div>

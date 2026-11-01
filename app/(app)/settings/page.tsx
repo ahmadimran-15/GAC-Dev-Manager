@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Copy } from "lucide-react";
 import { api, useLive } from "@/components/Live";
 import { reminderSettings } from "@/components/Reminders";
+import AccountsManager from "@/components/AccountsManager";
 import { ago } from "@/components/ui";
 
 function Row({ name, ok, detail, children }: { name: string; ok: boolean | null; detail: React.ReactNode; children?: React.ReactNode }) {
@@ -104,56 +105,17 @@ export default function Settings() {
         />
       </div>
 
-      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Channels</h2>
+      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Mailboxes &amp; WhatsApp numbers</h2>
+      <p className="mb-3 text-[13px] text-[var(--ink-2)]">Every place clients can reach the company. New messages land in your inbox only; replies are sent by this server from the account you pick. Your team never gets these passwords.</p>
+      <AccountsManager />
+      <div className="mt-2 text-[12.5px] text-[var(--muted)]">
+        Incoming WhatsApp webhook: <code>{k?.publicUrl || origin}/api/webhooks/whatsapp</code>
+        {k?.whatsappLastEvent ? ` · last message received ${ago(k.whatsappLastEvent)}` : " · no incoming message yet"}
+        {!k?.publicUrl && " · set PUBLIC_URL in .env to register it"}
+      </div>
+
+      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">More channels</h2>
       <div className="card divide-y divide-[var(--line)] px-5">
-        <Row
-          name="WhatsApp"
-          ok={k ? k.whatsappSession?.status === "ready" : null}
-          detail={
-            <>
-              {k?.whatsappSession
-                ? `Session ${k.whatsappSession.status}${k.whatsappSession.phone ? ` · +${k.whatsappSession.phone}` : ""}${k.whatsappSession.pushName ? ` (${k.whatsappSession.pushName})` : ""}.`
-                : "Add WA_BASE_URL, WA_SESSION_ID and WA_API_KEY to .env."}
-              {k?.whatsappLastEvent ? ` Last message received ${ago(k.whatsappLastEvent)}.` : " No incoming message received yet."}
-            </>
-          }
-        >
-          <CopyField value={`${k?.publicUrl || origin}/api/webhooks/whatsapp`} />
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button
-              className="btn btn-sm"
-              disabled={!k?.publicUrl}
-              onClick={async () => {
-                try {
-                  const r = await api<{ url: string }>("/api/whatsapp/register", {});
-                  toast(`Webhook registered: ${r.url}`);
-                } catch (e) {
-                  toast(e instanceof Error ? e.message : "Failed", "error");
-                }
-              }}
-            >
-              Register webhook on the gateway
-            </button>
-            <span className="text-[12px] text-[var(--muted)]">{k?.publicUrl ? "Adds this dashboard next to your existing n8n webhook, with a signing secret." : "Needs a public https address: set PUBLIC_URL in .env (after hosting or a tunnel)."}</span>
-          </div>
-        </Row>
-        <Row
-          name="Email"
-          ok={k ? k.email.length > 0 && k.email.every((e) => e.status?.ok !== false) : null}
-          detail={
-            k?.email.length ? (
-              <span className="space-y-0.5">
-                {k.email.map((e) => (
-                  <span key={e.label} className="block">
-                    <b>{e.label}</b> {e.user} · {e.status ? (e.status.ok ? `checked ${ago(e.status.at)}` : <span className="text-[var(--red)]">{e.status.error}</span>) : "connecting…"}
-                  </span>
-                ))}
-              </span>
-            ) : (
-              "Add EMAIL1_PROVIDER / EMAIL1_USER / EMAIL1_PASS to .env. Titan and Zoho use your normal password; Gmail needs an App Password."
-            )
-          }
-        />
         <Row name="Slack" ok={null} detail="Needs a Slack app (bot + user token). There is no QR login for Slack. I'll connect it once you create the app." />
         <Row name="Microsoft Teams & Outlook" ok={null} detail="Needs one Azure app registration (Sign in with Microsoft). Outlook no longer allows plain password login." />
       </div>
@@ -162,12 +124,12 @@ export default function Settings() {
       <div className="card divide-y divide-[var(--line)] px-5">
         <Row name="Gemini (your custom server)" ok={k ? k.gemini : null} detail="Writes suggested replies, polishes messages, drafts tasks and understands voice commands." />
         <Row
-          name="Speech to text (Whisper)"
+          name="Speech to text"
           ok={k ? k.transcription : null}
           detail={
             k?.whisper
-              ? "On. Client voice notes and your voice commands are transcribed by Whisper (English, Urdu, Hindi)."
-              : "Your Gemini web-to-API server can't read audio. Add WHISPER_API_KEY (free at console.groq.com) to transcribe client voice notes. Your own voice commands use the browser until then."
+              ? `On · ${k.stt}. Client voice notes are transcribed (English, Urdu, Hindi); Urdu and Hindi also get an English translation. Free and offline, no API key.`
+              : "Off. Set STT_PROVIDER=local in .env for free offline Whisper."
           }
         />
         <Row name="ClickUp" ok={k ? k.clickup : null} detail={k?.clickup ? "Connected. Tracks the Current Projects folder; new tasks go into the project's list there." : "Add CLICKUP_TOKEN (and CLICKUP_TEAM_ID) to .env."}>

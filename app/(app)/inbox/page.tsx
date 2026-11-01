@@ -9,6 +9,8 @@ import DraftCard from "@/components/DraftCard";
 import TaskDrawer, { type BoardLite } from "@/components/TaskDrawer";
 import { ackText } from "@/components/WaitingCard";
 import { ListSkeleton, ThreadSkeleton } from "@/components/Skeleton";
+import FromPicker from "@/components/FromPicker";
+import { accountOf } from "@/components/Live";
 
 interface Detail {
   conversation: ConvSummary & { subject: string | null };
@@ -35,6 +37,7 @@ function Inbox() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
+  const [from, setFrom] = useState("");
   const [selecting, setSelecting] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [drawer, setDrawer] = useState(false);
@@ -82,7 +85,7 @@ function Inbox() {
   async function doSend(text: string, ack = false) {
     if (!c || !text.trim()) return;
     setBusy(true);
-    if (await send(c.id, text.trim(), ack)) {
+    if (await send(c.id, text.trim(), ack, from || null)) {
       if (!ack) setReply("");
       await load();
     }
@@ -189,7 +192,7 @@ function Inbox() {
                   {c.company && <span className="font-normal text-[var(--muted)]"> · {c.company}</span>}
                 </div>
                 <div className="mt-0.5 flex items-center gap-3">
-                  <Channel c={c.channel} account={c.account} />
+                  <Channel c={c.channel} account={accountOf(state?.accounts, c.account)?.label ?? (c.account || null)} />
                   <select
                     className="rounded-md bg-transparent text-[12.5px] text-[var(--ink-2)] outline-none hover:bg-[var(--hover)]"
                     value={c.project ?? ""}
@@ -263,6 +266,7 @@ function Inbox() {
                         <div className="mt-1 px-1 text-[11px] text-[var(--muted)]">
                           {mine && m.ack ? "Acknowledged · " : ""}
                           {mine && m.sent_by && m.sent_by !== "me" ? `${m.sent_by === "phone" ? "From your phone" : `Written by ${m.sent_by}`} · ` : ""}
+                          {m.via ? `${mine ? "from" : "to"} ${m.via} · ` : ""}
                           {time(m.created_at)}
                           {m.status === "simulated" ? " · test mode" : ""}
                         </div>
@@ -294,6 +298,9 @@ function Inbox() {
                   </div>
                 </div>
               )}
+              <div className="mb-2 flex items-center justify-between">
+                <FromPicker channel={c.channel} account={c.account} value={from} onChange={setFrom} />
+              </div>
               <div className="rounded-2xl border border-[var(--line-2)] bg-white focus-within:border-[#a8a8a2]">
                 <textarea
                   dir="auto"
