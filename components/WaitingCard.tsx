@@ -36,6 +36,8 @@ export function ReplyBox({
   latest.current = value;
   // While Generate runs, late speech must not be appended to the generated reply
   const generating = useRef(false);
+  const abort = useRef<AbortController | null>(null);
+  const [running, setRunning] = useState(false);
   const voice = useVoice((t) => !generating.current && onChange(latest.current ? `${latest.current} ${t}` : t), !!state?.connections.voiceWhisper);
 
   async function generate() {
@@ -43,14 +45,18 @@ export function ReplyBox({
     const input = voice.interim && voice.interim !== "Transcribing…" ? `${value} ${voice.interim}`.trim() : value;
     generating.current = true;
     if (voice.listening) voice.stop();
+    abort.current = new AbortController();
+    setRunning(true);
     setBusy(true);
     try {
-      onChange((await api<{ text: string }>(`/api/conversations/${convId}`, { action: "generate", input })).text);
+      onChange((await api<{ text: string }>(`/api/conversations/${convId}`, { action: "generate", input }, abort.current.signal)).text);
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Gemini failed", "error");
+      if (!(e instanceof DOMException && e.name === "AbortError")) toast(e instanceof Error ? e.message : "Gemini failed", "error");
     } finally {
       setBusy(false);
+      setRunning(false);
       generating.current = false;
+      abort.current = null;
     }
   }
 
@@ -78,9 +84,15 @@ export function ReplyBox({
             {l.label}
           </button>
         ))}
-        <button className="btn btn-sm ml-auto" disabled={busy || !state?.connections.gemini} onClick={generate} title="Turn what's in the box into the finished reply">
-          {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Generate
-        </button>
+        {running ? (
+          <button className="btn btn-sm ml-auto" onClick={() => abort.current?.abort()} title="Stop generating; your text stays in the box">
+            <Loader2 size={13} className="animate-spin" /> Stop
+          </button>
+        ) : (
+          <button className="btn btn-sm ml-auto" disabled={busy || !state?.connections.gemini} onClick={generate} title="Turn what's in the box into the finished reply">
+            <Sparkles size={13} /> Generate
+          </button>
+        )}
       </div>
     </div>
   );

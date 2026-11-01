@@ -17,9 +17,9 @@ const META =
 
 // A client-facing message from Gemini: retried with a fresh session when it looks like Gemini talking to
 // us instead of a message to send; refused after that.
-async function clientMessage(prompt: string, session: string) {
+async function clientMessage(prompt: string, session: string, background = false) {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const text = strip(await chat(prompt, attempt ? `${session}-retry${attempt}-${Date.now()}` : session));
+    const text = strip(await chat(prompt, session, { background }));
     if (text && !META.test(text)) return text;
   }
   throw new Error("Gemini didn't return a usable message (it answered with an app or permission prompt). Try Generate again or type the reply.");
@@ -30,13 +30,34 @@ export const transcriptionConfigured = () => whisperConfigured() || !!process.en
 
 // Every call reuses ONE session (GEMINI_SESSION_ID): the server opens a new Gemini chat for each new session id
 // and rate-limits that, so per-feature ids made calls fail. The prompt PREFIX makes each answer stand alone.
-// Calls are queued so two prompts never land in that one chat at the same time.
-let queue: Promise<unknown> = Promise.resolve();
-export function chat(prompt: string, _purpose = "portal"): Promise<string> {
-  const next = queue.then(() => ask(prompt));
-  queue = next.catch(() => {});
-  return next;
+// Calls run one at a time so two prompts never land in that one chat together. Anything the manager clicked
+// goes first; background work (estimates, auto-summaries, auto-suggestions) only runs when nobody is waiting.
+type Job = { prompt: string; resolve: (s: string) => void; reject: (e: unknown) => void };
+const now: Job[] = [];
+const later: Job[] = [];
+let busy = false;
+async function pump() {
+  if (busy) return;
+  busy = true;
+  try {
+    for (let job = now.shift() ?? later.shift(); job; job = now.shift() ?? later.shift()) {
+      try {
+        job.resolve(await ask(job.prompt));
+      } catch (e) {
+        job.reject(e);
+      }
+    }
+  } finally {
+    busy = false;
+  }
 }
+export function chat(prompt: string, _purpose = "portal", opts: { background?: boolean } = {}): Promise<string> {
+  return new Promise((resolve, reject) => {
+    (opts.background ? later : now).push({ prompt, resolve, reject });
+    pump();
+  });
+}
+export const aiQueue = () => ({ waiting: now.length, background: later.length, busy });
 
 async function ask(prompt: string) {
   const { GEMINI_BASE_URL, GEMINI_API_KEY, GEMINI_MODEL, GEMINI_SESSION_ID } = process.env;
@@ -80,7 +101,8 @@ async function transcriptFor(convId: string, limit = 12) {
 }
 
 // Draft the reply the manager would most likely send now, and store it on the conversation.
-export async function suggestReply(convId: string) {
+// background=true when drafted automatically after a client message (waits behind anything you clicked)
+export async function suggestReply(convId: string, background = false) {
   const c = await getConversation(convId);
   if (!c) return null;
   const msgs = await getMessages(convId);
@@ -91,6 +113,7 @@ export async function suggestReply(convId: string) {
       `You don't know technical details, so acknowledge, say the team is on it and promise a concrete update time when it fits. ` +
       `Address them by first name. Return only the reply text.\n\nConversation:\n${await transcriptFor(convId)}`,
     `suggest-${convId}`,
+    background,
   );
   await updateConversation(convId, { suggestion: text, suggestion_for: lastIn?.id ?? null });
   return text;
@@ -116,7 +139,7 @@ export async function generateReply(convId: string, input: string) {
 
 // A short "what's going on here" note for the thread: who the client is, what they asked for, what our
 // side (you or a teammate) already answered or promised, and what is still open. Works for every channel.
-export async function summarizeConversation(convId: string) {
+export async function summarizeConversation(convId: string, background = false) {
   const c = await getConversation(convId);
   if (!c) return null;
   const msgs = (await getMessages(convId)).slice(-40);
@@ -130,6 +153,7 @@ export async function summarizeConversation(convId: string) {
         `Say who ${c.name} is and what they want, what our side already replied or promised (name who said it), and what is still open or needs an answer. ` +
         `${c.subject ? `Email subject: ${c.subject}. ` : ""}${c.project ? `Project: ${c.project}. ` : ""}Return only the summary lines.\n\nConversation:\n${transcript}`,
       `context-${convId}`,
+      { background },
     )
   ).trim();
   await updateConversation(convId, { context: text, context_at: Date.now() });

@@ -74,6 +74,7 @@ export async function estimateMissing(max = 60) {
         chunk.map((t, n) => `${n + 1}. [${t.id}] ${t.title} (project: ${t.project}; status: ${t.status})`).join("\n") +
         `\n\nReturn ONLY JSON: {"tasks": [{"id": "task id in brackets", "minutes": number, "reason": "max 12 words"}]}`,
       "estimate-batch",
+      { background: true },
     ).catch(() => "");
     let list: { id: string; minutes: number; reason?: string }[] = [];
     try {

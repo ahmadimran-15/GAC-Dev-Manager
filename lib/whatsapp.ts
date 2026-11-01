@@ -8,15 +8,21 @@ import { accountsWithSecrets, getAccount, type AccountWithSecret } from "@/lib/a
 
 const base = (a: AccountWithSecret) => (a.config.baseUrl ?? "").replace(/\/$/, "");
 
-async function wa<T>(a: AccountWithSecret, p: string, init?: RequestInit): Promise<T> {
+class GatewayError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+async function wa<T>(a: AccountWithSecret, p: string, init?: RequestInit, timeoutMs = 30_000): Promise<T> {
   const res = await fetch(`${base(a)}/api/sessions/${a.config.sessionId}${p}`, {
     ...init,
     headers: { "x-api-key": a.secret, accept: "application/json", "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(timeoutMs),
     cache: "no-store",
   });
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.message ? [data.message].flat().join(", ") : `WhatsApp gateway error ${res.status}`);
+  if (!res.ok) throw new GatewayError(data?.message ? [data.message].flat().join(", ") : `WhatsApp gateway error ${res.status}`, res.status);
   return data as T;
 }
 
@@ -26,33 +32,37 @@ const pick = async (id?: string | null) => (id ? await getAccount(id) : null) ??
 
 const chatIdFor = (to: string) => (to.includes("@") ? to : `${to.replace(/[^\d]/g, "")}@c.us`);
 
-// opts.quotedMessageId turns the send into a reply to that message; opts.mentions = ["923…@c.us"]
-// (the text must contain "@923…" for each). A quote the gateway can't resolve is retried without it.
+// One send = ONE request, like a plain curl to send-text. Never re-sent automatically: a slow gateway may still
+// deliver after we stop waiting, and re-sending made duplicates. The only retry is when the gateway clearly
+// REJECTS the quote (4xx = nothing was sent); then it goes once without the quote.
+// opts.quotedMessageId makes it a reply; opts.mentions = ["923…@c.us"] (the text must contain "@923…").
 export async function sendWhatsApp(
   to: string,
   text: string,
   accountId?: string | null,
   opts: { quotedMessageId?: string | null; mentions?: string[] } = {},
-): Promise<{ ok: boolean; simulated?: boolean; id?: string; error?: string; quoted?: boolean }> {
+): Promise<{ ok: boolean; simulated?: boolean; id?: string; error?: string; quoted?: boolean; uncertain?: boolean }> {
   const a = await pick(accountId);
   if (!a) return { ok: true, simulated: true };
   const body = { chatId: chatIdFor(to), text, ...(opts.mentions?.length ? { mentions: opts.mentions } : {}) };
   const sendOnce = async (quoted?: string | null) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const r = await wa<any>(a, "/messages/send-text", { method: "POST", body: JSON.stringify(quoted ? { ...body, quotedMessageId: quoted } : body) });
+    const r = await wa<any>(a, "/messages/send-text", { method: "POST", body: JSON.stringify(quoted ? { ...body, quotedMessageId: quoted } : body) }, 120_000);
     return String(r?.messageId ?? r?.waMessageId ?? r?.id ?? "") || undefined;
   };
   try {
-    if (opts.quotedMessageId) {
+    return { ok: true, id: await sendOnce(opts.quotedMessageId), quoted: !!opts.quotedMessageId };
+  } catch (e) {
+    if (opts.quotedMessageId && e instanceof GatewayError && e.status >= 400 && e.status < 500) {
       try {
-        return { ok: true, id: await sendOnce(opts.quotedMessageId), quoted: true };
-      } catch {
-        /* quote not resolvable on this engine: send it as a normal message */
+        return { ok: true, id: await sendOnce(), quoted: false };
+      } catch (e2) {
+        return { ok: false, error: e2 instanceof Error ? e2.message : "WhatsApp send failed" };
       }
     }
-    return { ok: true, id: await sendOnce(), quoted: false };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "WhatsApp send failed" };
+    // Timeout / gateway down: it may still go out, so don't retry; tell the user to check before re-sending
+    if (!(e instanceof GatewayError)) return { ok: false, uncertain: true, error: "WhatsApp is slow to confirm. It may still be delivered: check the chat before sending again." };
+    return { ok: false, error: e.message };
   }
 }
 
@@ -83,14 +93,19 @@ export async function resolveMentions(text: string, people: { name: string; numb
   return { text: out, mentions: [...mentions] };
 }
 
-// Phone numbers of a group's members (for mentions); empty if the gateway can't tell
+// Phone numbers of a group's members (for mentions); empty if the gateway can't tell within 5 s. Cached 30 min.
+const memberCache = new Map<string, { at: number; list: string[] }>();
 export async function groupMembers(a: AccountWithSecret, groupId: string): Promise<string[]> {
+  const hit = memberCache.get(groupId);
+  if (hit && Date.now() - hit.at < 30 * 60_000) return hit.list;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const g = await wa<any>(a, `/groups/${encodeURIComponent(groupId)}`);
+    const g = await wa<any>(a, `/groups/${encodeURIComponent(groupId)}`, undefined, 5_000);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const list: any[] = g?.participants ?? g?.data?.participants ?? [];
-    return list.map((p) => String(p?.phone ?? p?.number ?? p?.id?._serialized ?? p?.id ?? "").split("@")[0].replace(/[^\d]/g, "")).filter(Boolean);
+    const out = list.map((p) => String(p?.phone ?? p?.number ?? p?.id?._serialized ?? p?.id ?? "").split("@")[0].replace(/[^\d]/g, "")).filter(Boolean);
+    memberCache.set(groupId, { at: Date.now(), list: out });
+    return out;
   } catch {
     return [];
   }

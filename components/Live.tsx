@@ -53,8 +53,8 @@ export interface LiveState {
   hasDemo: boolean;
 }
 
-export async function api<T = Record<string, unknown>>(url: string, body?: unknown): Promise<T> {
-  const res = await fetch(url, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+export async function api<T = Record<string, unknown>>(url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, body === undefined ? { cache: "no-store", signal } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
   const data = await res.json().catch(() => null);
   if (res.status === 401) {
     location.href = "/login";

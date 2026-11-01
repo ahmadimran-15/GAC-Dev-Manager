@@ -38,7 +38,7 @@ export function afterIncoming(convId: string) {
     convId,
     setTimeout(() => {
       timers.delete(convId);
-      suggestReply(convId).catch((e) => log("suggest-error", { convId, error: String(e) }));
+      suggestReply(convId, true).catch((e) => log("suggest-error", { convId, error: String(e) }));
     }, 4000),
   );
 }
@@ -55,7 +55,7 @@ export function afterTeammateReply(convId: string) {
     convId,
     setTimeout(() => {
       contextTimers.delete(convId);
-      summarizeConversation(convId).catch((e) => log("context-error", { convId, error: String(e) }));
+      summarizeConversation(convId, true).catch((e) => log("context-error", { convId, error: String(e) }));
     }, 6000),
   );
 }
@@ -186,7 +186,8 @@ async function mentionsFor(text: string, c: { external_id: string }, accountId: 
   const accs = await waAccounts();
   const a = accs.find((x) => x.id === accountId) ?? accs[0];
   if (!a) return { text, mentions: [] as string[] };
-  const contacts = await listTargets(a, "contacts").catch(() => []);
+  // Never hold a send up for the contact list: if it isn't cached yet, wait at most 4 s (it keeps loading for next time)
+  const contacts = await Promise.race([listTargets(a, "contacts").catch(() => []), new Promise<[]>((r) => setTimeout(() => r([]), 4000))]);
   let people = [...(await teamNumbers()), ...contacts.map((t) => ({ name: t.name, number: t.number ?? "" }))].filter((p) => p.number && p.name && !/^\+?\d+$/.test(p.name));
   if (c.external_id.endsWith("@g.us")) {
     const members = new Set(await groupMembers(a, c.external_id));
@@ -195,7 +196,26 @@ async function mentionsFor(text: string, c: { external_id: string }, accountId: 
   return resolveMentions(text, people);
 }
 
+// Same text to the same chat while a send is running or within a minute = a double click, not a new message
+const inFlight = new Set<string>();
+
 export async function sendToConversation(convId: string, text: string, opts: { ack?: boolean; by?: string; from?: string | null; quote?: boolean } = {}) {
+  // "@tulaib" is stored as "@923…", so compare with mentions blanked out
+  const norm = (s: string | null | undefined) => String(s ?? "").replace(/@\S+/g, "@").replace(/\s+/g, " ").trim();
+  const key = `${convId}\n${norm(text)}`;
+  if (inFlight.has(key)) throw new Error("This message is already being sent.");
+  const recent = (await getMessages(convId)).slice(-5);
+  if (recent.some((m) => m.direction === "out" && norm(m.text) === norm(text) && Date.now() - Number(m.created_at) < 60_000))
+    throw new Error("You sent this exact message less than a minute ago.");
+  inFlight.add(key);
+  try {
+    return await sendOnceTo(convId, text, opts);
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
+async function sendOnceTo(convId: string, text: string, opts: { ack?: boolean; by?: string; from?: string | null; quote?: boolean }) {
   const c = await getConversation(convId);
   if (!c) throw new Error("Conversation not found");
   let r: { ok: boolean; simulated?: boolean; id?: string; error?: string };
