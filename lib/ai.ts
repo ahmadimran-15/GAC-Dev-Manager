@@ -1,5 +1,7 @@
 import { getConversation, getMessages, msgText, updateConversation } from "@/lib/store";
 import { whisper, whisperConfigured } from "@/lib/stt";
+import { defaultSender } from "@/lib/accounts";
+import { taggablePeople } from "@/lib/whatsapp";
 
 // Text goes to the custom Gemini web-to-API server (OpenAI-compatible). It can't take audio, so voice
 // notes are transcribed by Whisper (WHISPER_API_KEY) or, failing that, the Google AI API (GOOGLE_AI_API_KEY).
@@ -125,12 +127,20 @@ export async function generateReply(convId: string, input: string) {
   const c = await getConversation(convId);
   if (!c) throw new Error("Conversation not found");
   const group = c.channel === "whatsapp" && c.external_id.endsWith("@g.us");
+  // The group's members by first name, so a spoken "tag Tulayb" comes out as the right "@Tulaib"
+  let names: string[] = [];
+  if (group && /\b(tag|mention)|@/i.test(input)) {
+    const a = await defaultSender("whatsapp", c.account);
+    const close = a ? (await taggablePeople(a, c.external_id, 3_000).catch(() => null))?.close : null;
+    names = [...new Set((close ?? []).map((p) => p.name.split(/\s+/)[0]).filter((n) => n.length >= 3))].slice(0, 60);
+  }
   return clientMessage(
     `You are the project manager of a software agency writing to a client${group ? " in their WhatsApp group" : ""}${c.project ? ` about the "${c.project}" project` : ""}. ` +
       (input.trim()
         ? `The manager typed or dictated this (it may be a rough draft or an instruction, in English, Urdu, Hindi or a mix):\n"${input.trim()}"\n\n` +
           `Write the final message following it. If it's a draft, keep its meaning and improve it; if it's an instruction, do what it says. ` +
-          `If they ask to tag or mention someone, put @ followed by that person's name exactly as the manager wrote it (e.g. @TuLab) where it fits. `
+          `If they ask to tag or mention someone, write @ followed by that person's first name as one word (e.g. @Tulaib) where it fits. ` +
+          (names.length ? `People in this group who can be tagged (use the closest of these spellings): ${names.join(", ")}. ` : "")
         : `Write the next reply to the client's latest messages. `) +
       `Write the message itself, addressed to the client, not a note to the manager about it. Short, warm and professional, in English. Return only the message.\n\nConversation:\n${await transcriptFor(convId, 20)}`,
     `generate-${convId}`,

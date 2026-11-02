@@ -79,7 +79,7 @@ async function doBackfill({ days = Number(process.env.BACKFILL_DAYS ?? 7), full 
       const isGroup = list[0].m.isGroup;
       if (isGroup) {
         // A client group has someone from our team in it (your own family/friends groups don't)
-        const client = tracked[chatId] || list.some((x) => x.teammate) || (await groupMembers(a, chatId)).some((n) => team.some((t) => t.number === n));
+        const client = tracked[chatId] || list.some((x) => x.teammate) || ((await groupMembers(a, chatId, 5_000)) ?? []).some((n) => team.some((t) => t.number === n));
         if (!client) continue;
         const name = tracked[chatId] ?? names.get(chatId) ?? (list.find((x) => x.m.name && x.m.name !== chatId)?.m.name || "WhatsApp group");
         if (!tracked[chatId]) await trackGroup(chatId, name);

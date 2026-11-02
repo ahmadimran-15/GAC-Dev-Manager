@@ -5,20 +5,19 @@ import {
   bareId,
   chatStatuses,
   downloadMedia,
-  groupMembers,
   isNewer,
-  listTargets,
   parseAck,
   parseIncoming,
   resolveMentions,
   senderPhone,
   sendWhatsApp,
+  taggablePeople,
   waAccounts,
   waConfigured,
   type Delivery,
   type Incoming,
 } from "@/lib/whatsapp";
-import { teamMember, teamNumbers } from "@/lib/team-numbers";
+import { teamMember } from "@/lib/team-numbers";
 import { pollAll, sendEmail } from "@/lib/email";
 import { defaultSender, getAccount, listAccounts } from "@/lib/accounts";
 import { trackGroup, trackedGroups } from "@/lib/groups";
@@ -180,20 +179,39 @@ export async function storeWhatsApp(inc: Incoming, live: boolean) {
 // ---------- Sending ----------
 
 // opts.from = the account (mailbox / WhatsApp number) to send from; defaults to the one the client wrote to.
-// People "@Name" can refer to: saved WhatsApp contacts and team numbers (in a group, its members first)
-async function mentionsFor(text: string, c: { external_id: string }, accountId: string) {
-  if (!text.includes("@")) return { text, mentions: [] as string[] };
+// "@Name" → a real WhatsApp mention of a saved contact or team number (in a group: only its members).
+// Only messages that tag someone wait for the contact and member lists (both are usually cached already).
+// A group member's plain name is tagged too, but only from lists already loaded: a message without "@" never waits.
+async function mentionsFor(text: string, c: { external_id: string }, accountId: string, waitMs = 40_000) {
+  const none = { text, display: text, mentions: [] as string[], missed: [] as string[], tagged: [] as string[] };
+  const at = /@\p{L}/u.test(text);
+  if (!at && !c.external_id.endsWith("@g.us")) return none;
   const accs = await waAccounts();
   const a = accs.find((x) => x.id === accountId) ?? accs[0];
-  if (!a) return { text, mentions: [] as string[] };
-  // Never hold a send up for the contact list: if it isn't cached yet, wait at most 4 s (it keeps loading for next time)
-  const contacts = await Promise.race([listTargets(a, "contacts").catch(() => []), new Promise<[]>((r) => setTimeout(() => r([]), 4000))]);
-  let people = [...(await teamNumbers()), ...contacts.map((t) => ({ name: t.name, number: t.number ?? "" }))].filter((p) => p.number && p.name && !/^\+?\d+$/.test(p.name));
-  if (c.external_id.endsWith("@g.us")) {
-    const members = new Set(await groupMembers(a, c.external_id));
-    if (members.size) people = people.filter((p) => members.has(p.number));
-  }
-  return resolveMentions(text, people);
+  if (!a) return none;
+  const { people, close } = await taggablePeople(a, c.external_id, at ? waitMs : 0);
+  return resolveMentions(text, people, close ?? []);
+}
+
+// What Send would do with this text: who gets tagged, which "@Name"s match nobody, and the group's members
+// (first names) for the "@" picker in the reply box.
+export async function previewTags(convId: string, text: string) {
+  const c = await getConversation(convId);
+  if (!c || c.channel !== "whatsapp") return { tagged: [], missed: [], members: [] };
+  const a = await defaultSender("whatsapp", c.account);
+  if (!a) return { tagged: [], missed: [], members: [] };
+  const { close } = await taggablePeople(a, c.external_id, 3_000);
+  const m = text.trim() ? await mentionsFor(text, c, a.id, 3_000) : { tagged: [] as string[], missed: [] as string[] };
+  const members = [...new Set((close ?? []).map((p) => p.name.split(/\s+/)[0]).filter((n) => n.length >= 3 && /^\p{L}/u.test(n)))].sort();
+  return { tagged: m.tagged, missed: m.missed, members: c.external_id.endsWith("@g.us") ? members : [] };
+}
+
+// Load a group's members and the contact list ahead of time, so tagging in it doesn't wait at send time
+export async function warmTagging(convId: string) {
+  const c = await getConversation(convId);
+  if (!c || c.channel !== "whatsapp") return;
+  const a = await defaultSender("whatsapp", c.account);
+  if (a) taggablePeople(a, c.external_id).catch(() => {});
 }
 
 // Same text to the same chat while a send is running or within a minute = a double click, not a new message
@@ -220,6 +238,7 @@ async function sendOnceTo(convId: string, text: string, opts: { ack?: boolean; b
   if (!c) throw new Error("Conversation not found");
   let r: { ok: boolean; simulated?: boolean; id?: string; error?: string };
   let via: string | null = null;
+  let untagged: string[] = [];
   if (c.demo) r = { ok: true, simulated: true };
   else if (c.channel === "whatsapp" || c.channel === "email") {
     const kind = c.channel;
@@ -232,14 +251,15 @@ async function sendOnceTo(convId: string, text: string, opts: { ack?: boolean; b
       const msgs = await getMessages(convId);
       const lastIn = opts.quote === false ? undefined : [...msgs].reverse().find((m) => m.direction === "in" && m.external_id);
       const m = await mentionsFor(text, c, sender.id);
-      text = m.text;
-      r = await sendWhatsApp(c.external_id, text, sender.id, { quotedMessageId: lastIn?.external_id, mentions: m.mentions });
+      untagged = m.missed;
+      r = await sendWhatsApp(c.external_id, m.text, sender.id, { quotedMessageId: lastIn?.external_id, mentions: m.mentions });
+      text = m.display; // stored and shown as "@Tulaib", not "@923…"
     }
   } else r = { ok: true, simulated: true }; // Slack / Teams / Outlook connect later
   if (!r.ok) throw new Error(r.error ?? "Send failed");
   await addMessage({ conv_id: convId, direction: "out", text, ack: opts.ack ? 1 : 0, sent_by: opts.by ?? "me", status: r.simulated ? "simulated" : "sent", external_id: r.id ?? null, via });
   await updateConversation(convId, { suggestion: null, suggestion_for: null, reminded_at: null });
-  return { simulated: !!r.simulated, channel: c.channel, name: c.name, via };
+  return { simulated: !!r.simulated, channel: c.channel, name: c.name, via, untagged };
 }
 
 // Send to anyone: a WhatsApp group or contact picked from your lists, or any email address.

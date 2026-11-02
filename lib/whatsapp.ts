@@ -3,6 +3,7 @@ import path from "path";
 import { createHmac, timingSafeEqual } from "crypto";
 import { MEDIA_DIR } from "@/lib/db";
 import { accountsWithSecrets, getAccount, type AccountWithSecret } from "@/lib/accounts";
+import { teamNumbers } from "@/lib/team-numbers";
 
 // ChatSlash / OpenWA self-hosted WhatsApp gateway. Each WhatsApp number is an account (session) added in Settings.
 
@@ -66,49 +67,141 @@ export async function sendWhatsApp(
   }
 }
 
-// "@TuLab please check" → "@92300… please check" + mentions, using saved contacts and team numbers.
-// In a group only its members are considered when the gateway lists them.
-export async function resolveMentions(text: string, people: { name: string; number: string }[]) {
-  if (!text.includes("@")) return { text, mentions: [] as string[] };
-  const mentions = new Set<string>();
+type Person = { name: string; number: string };
+
+// Edit distance, for spoken or misspelt names ("@Tulayb", "@TuLab" → Tulaib)
+function distance(a: string, b: string) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+// Capitalised words that are also first names; never tagged without an "@"
+const NOT_NAMES = new Set(["will", "mark", "may", "hope", "grace", "faith", "joy", "bill", "team", "admin", "dev", "support", "sales", "office", "client", "manager"]);
+
+// "@Tulaib please check" → text "@92300… please check" + mentions ["92300…@c.us"] (what WhatsApp needs),
+// display "@Tulaib please check" (what we store and show). Full names, then unique first names, then
+// (only among `close`, e.g. a group's members) the one nearest spelling. missed = "@Name"s nobody matched.
+// In a group (`close` given) a member's first name written without "@" ("Tulaib please check") is tagged too.
+export async function resolveMentions(text: string, people: Person[], close: Person[] = []) {
+  const none = { text, display: text, mentions: [] as string[], missed: [] as string[], tagged: [] as string[] };
   const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const first = (n: string) => n.split(/\s+/)[0];
+  const tagged = new Set<string>();
   let out = text;
+  let display = text;
+  // "tag tulaib" / "mention Tulaib" typed straight into the reply → "@tulaib" (matched below), when that's a member
+  const near = (w: string) => close.some((p) => distance(w.toLowerCase(), first(p.name).toLowerCase()) <= (w.length >= 6 ? 2 : 1));
+  const asTag = (s: string) => s.replace(/(?<![\p{L}\p{N}_])(?:tag|mention)\s+@?(\p{L}{3,})/giu, (m, w: string) => (near(w) ? `@${w}` : m));
+  out = asTag(out);
+  display = asTag(display);
+  // Plain names: unique first names of group members, written capitalised as a whole word, first time only
+  const counts = new Map<string, Set<string>>();
+  for (const p of close) counts.set(first(p.name).toLowerCase(), (counts.get(first(p.name).toLowerCase()) ?? new Set()).add(p.number));
+  for (const p of close) {
+    const f = first(p.name);
+    if (f.length < 4 || NOT_NAMES.has(f.toLowerCase()) || counts.get(f.toLowerCase())!.size > 1 || !/^\p{L}+$/u.test(f)) continue;
+    // "Tulaib" / "TULAIB" but not "tulaib" inside a sentence, and not "@Tulaib" (handled below)
+    const pat = `${f[0].toUpperCase()}${[...f.slice(1)].map((ch) => `[${ch.toLowerCase()}${ch.toUpperCase()}]`).join("")}`;
+    const re = new RegExp(`(?<![@\\p{L}\\p{N}_])${pat}(?![\\p{L}\\p{N}_])`, "u");
+    if (re.test(out)) {
+      out = out.replace(re, `@${p.number}`);
+      display = display.replace(re, `@${f}`);
+      tagged.add(f);
+    }
+  }
+  if (!out.includes("@")) return none;
+  const mentions = new Set<string>([...tagged].map((f) => `${close.find((p) => first(p.name) === f)!.number}@c.us`));
   // Longest names first so "@Muhammad Ali" wins over "@Muhammad"; then unique first names
-  const firsts = new Map<string, { name: string; number: string }[]>();
+  const firsts = new Map<string, Person[]>();
   for (const p of people) {
-    const f = p.name.split(/\s+/)[0].toLowerCase();
-    firsts.set(f, [...(firsts.get(f) ?? []), p]);
+    const f = first(p.name).toLowerCase();
+    if (!(firsts.get(f) ?? []).some((x) => x.number === p.number)) firsts.set(f, [...(firsts.get(f) ?? []), p]);
   }
   const candidates = [
-    ...[...people].sort((x, y) => y.name.length - x.name.length).map((p) => ({ token: p.name, number: p.number })),
-    ...[...firsts].filter(([, l]) => l.length === 1).map(([f, l]) => ({ token: f, number: l[0].number })),
-  ].filter((c) => c.token.length >= 3 && c.number);
+    ...[...people].sort((x, y) => y.name.length - x.name.length).map((p) => ({ token: p.name, p })),
+    ...[...firsts].filter(([, l]) => l.length === 1).map(([f, l]) => ({ token: f, p: l[0] })),
+  ].filter((c) => c.token.length >= 3 && c.p.number);
   for (const c of candidates) {
     const re = new RegExp(`@${esc(c.token)}(?![\\p{L}\\p{N}])`, "giu");
     if (re.test(out)) {
-      out = out.replace(re, `@${c.number}`);
-      mentions.add(`${c.number}@c.us`);
+      out = out.replace(re, `@${c.p.number}`);
+      display = display.replace(re, `@${first(c.p.name)}`);
+      mentions.add(`${c.p.number}@c.us`);
+      tagged.add(first(c.p.name));
     }
   }
-  return { text: out, mentions: [...mentions] };
+  // Whatever is left: nearest first name among the close people, if exactly one is near enough
+  const missed: string[] = [];
+  // (an "@" inside a word is an email address, not a tag)
+  for (const m of [...out.matchAll(/(?<![\p{L}\p{N}_.])@(\p{L}[\p{L}\p{N}_]{1,})/gu)]) {
+    const token = m[1].toLowerCase();
+    const scored = close
+      .map((p) => ({ p, d: distance(token, first(p.name).toLowerCase()) }))
+      .filter((x) => x.d <= (token.length >= 6 ? 2 : 1))
+      .sort((x, y) => x.d - y.d);
+    const best = scored.filter((x) => x.d === scored[0]?.d);
+    if (token.length >= 3 && best.length && best.every((x) => x.p.number === best[0].p.number)) {
+      const re = new RegExp(`@${esc(m[1])}(?![\\p{L}\\p{N}])`, "gu");
+      out = out.replace(re, `@${best[0].p.number}`);
+      display = display.replace(re, `@${first(best[0].p.name)}`);
+      mentions.add(`${best[0].p.number}@c.us`);
+      tagged.add(first(best[0].p.name));
+    } else missed.push(m[1]);
+  }
+  return { text: out, display, mentions: [...mentions], missed: [...new Set(missed)], tagged: [...tagged] };
 }
 
-// Phone numbers of a group's members (for mentions); empty if the gateway can't tell within 5 s. Cached 30 min.
+// Phone numbers of a group's members (for mentions). The gateway takes ~30 s to list them, so the list is
+// cached for 30 min and refreshed in the background; waitMs = how long a caller may wait when nothing is cached.
+// null = not known (yet).
 const memberCache = new Map<string, { at: number; list: string[] }>();
-export async function groupMembers(a: AccountWithSecret, groupId: string): Promise<string[]> {
-  const hit = memberCache.get(groupId);
-  if (hit && Date.now() - hit.at < 30 * 60_000) return hit.list;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const g = await wa<any>(a, `/groups/${encodeURIComponent(groupId)}`, undefined, 5_000);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const list: any[] = g?.participants ?? g?.data?.participants ?? [];
-    const out = list.map((p) => String(p?.phone ?? p?.number ?? p?.id?._serialized ?? p?.id ?? "").split("@")[0].replace(/[^\d]/g, "")).filter(Boolean);
-    memberCache.set(groupId, { at: Date.now(), list: out });
-    return out;
-  } catch {
-    return [];
+const memberLoads = new Map<string, Promise<string[] | null>>();
+function loadMembers(a: AccountWithSecret, groupId: string) {
+  let p = memberLoads.get(groupId);
+  if (!p) {
+    p = (async () => {
+      try {
+        const get = () => wa<any>(a, `/groups/${encodeURIComponent(groupId)}`, undefined, 90_000); // eslint-disable-line @typescript-eslint/no-explicit-any
+        const g = await get().catch(get); // one retry: the gateway sometimes drops a call when busy
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const list: any[] = g?.participants ?? g?.data?.participants ?? [];
+        const out = list.map((x) => String(x?.number ?? x?.phone ?? x?.id?._serialized ?? x?.id ?? "").split("@")[0].replace(/[^\d]/g, "")).filter(Boolean);
+        memberCache.set(groupId, { at: Date.now(), list: out });
+        return out;
+      } catch {
+        return null;
+      } finally {
+        memberLoads.delete(groupId);
+      }
+    })();
+    memberLoads.set(groupId, p);
   }
+  return p;
+}
+export async function groupMembers(a: AccountWithSecret, groupId: string, waitMs = 0): Promise<string[] | null> {
+  const hit = memberCache.get(groupId);
+  if (hit) {
+    if (Date.now() - hit.at > 30 * 60_000) loadMembers(a, groupId);
+    return hit.list;
+  }
+  const load = loadMembers(a, groupId);
+  return waitMs ? Promise.race([load, new Promise<null>((r) => setTimeout(() => r(null), waitMs))]) : null;
+}
+
+// Who "@Name" can mean in a chat: saved contacts and team numbers. In a group, `close` = the ones who are
+// members (only they get tagged, so a client group never sees a stranger's number), or null if unknown.
+export async function taggablePeople(a: AccountWithSecret, chatId: string, waitMs = 0): Promise<{ people: Person[]; close: Person[] | null }> {
+  const contacts = await Promise.race([listTargets(a, "contacts").catch(() => [] as Target[]), new Promise<Target[]>((r) => setTimeout(() => r(contactCache(a) ?? []), Math.max(waitMs, 1)))]);
+  const people = [...(await teamNumbers()), ...contacts.map((t) => ({ name: t.name, number: t.number ?? "" }))].filter((p) => p.number && p.name && !/^\+?\d+$/.test(p.name));
+  if (!chatId.endsWith("@g.us")) return { people, close: people };
+  const members = await groupMembers(a, chatId, waitMs);
+  if (!members) return { people, close: null };
+  const set = new Set(members);
+  const close = people.filter((p) => set.has(p.number));
+  return { people: close, close };
 }
 
 export async function sessionStatus(a: AccountWithSecret) {
@@ -346,12 +439,31 @@ export interface Target {
 }
 
 const targetCache = new Map<string, { at: number; list: Target[] }>();
+const targetLoads = new Map<string, Promise<Target[]>>();
+const contactCache = (a: AccountWithSecret) => targetCache.get(`${a.id}:contacts`)?.list ?? null;
 
-// Your WhatsApp groups or saved contacts, cached for 10 minutes (the group list takes a few seconds).
+// Your WhatsApp groups or saved contacts. Cached: after 10 minutes the old list is still answered at once
+// while a fresh one loads in the background (the contact list takes several seconds).
 export async function listTargets(a: AccountWithSecret, type: "groups" | "contacts", refresh = false): Promise<Target[]> {
   const key = `${a.id}:${type}`;
   const hit = targetCache.get(key);
   if (!refresh && hit && Date.now() - hit.at < 10 * 60_000) return hit.list;
+  let load = targetLoads.get(key);
+  if (!load) {
+    load = fetchTargets(a, type)
+      .catch(() => fetchTargets(a, type)) // one retry: the gateway sometimes drops a call when busy
+      .finally(() => targetLoads.delete(key));
+    targetLoads.set(key, load);
+  }
+  if (!refresh && hit) {
+    load.catch(() => {});
+    return hit.list;
+  }
+  return load;
+}
+
+async function fetchTargets(a: AccountWithSecret, type: "groups" | "contacts"): Promise<Target[]> {
+  const key = `${a.id}:${type}`;
   const out: Target[] = [];
   // The gateway's /groups call can take over 30 s; the chat list has the same groups and answers in a second
   if (type === "groups") {

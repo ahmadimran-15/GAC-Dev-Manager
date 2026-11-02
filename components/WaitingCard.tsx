@@ -35,11 +35,22 @@ export function ReplyBox({
   const [lang, setLang] = useState("en-US");
   const latest = useRef(value);
   latest.current = value;
+  const box = useRef<HTMLTextAreaElement>(null);
   // While Generate runs, late speech must not be appended to the generated reply
   const generating = useRef(false);
   const abort = useRef<AbortController | null>(null);
   const [running, setRunning] = useState(false);
   const voice = useVoice((t) => !generating.current && onChange(latest.current ? `${latest.current} ${t}` : t), !!state?.connections.voiceWhisper);
+
+  // Who Send will tag (WhatsApp groups), checked a moment after typing stops; members feed the "@" picker
+  const [tags, setTags] = useState<{ tagged: string[]; missed: string[]; members: string[] }>({ tagged: [], missed: [], members: [] });
+  useEffect(() => {
+    const ctl = new AbortController();
+    const id = setTimeout(() => api<typeof tags>(`/api/conversations/${convId}`, { action: "tags", text: value }, ctl.signal).then(setTags).catch(() => {}), 600);
+    return () => (clearTimeout(id), ctl.abort());
+  }, [convId, value]);
+  const typingTag = value.match(/(?:^|\s)@(\p{L}*)$/u)?.[1];
+  const picks = typingTag === undefined ? [] : tags.members.filter((n) => n.toLowerCase().startsWith(typingTag.toLowerCase())).slice(0, 8);
 
   async function generate() {
     // Stop the mic first and include what was just being said
@@ -64,6 +75,7 @@ export function ReplyBox({
   return (
     <div className="rounded-xl border border-[var(--line-2)] bg-white focus-within:border-[#a8a8a2]">
       <textarea
+        ref={box}
         dir="auto"
         rows={rows}
         className="w-full resize-none rounded-xl bg-transparent px-3 pt-2.5 text-[14px] leading-relaxed outline-none placeholder:text-[var(--muted)]"
@@ -72,6 +84,33 @@ export function ReplyBox({
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => onSubmit && (e.ctrlKey || e.metaKey) && e.key === "Enter" && onSubmit()}
       />
+      {picks.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 px-3 pb-1.5">
+          <span className="text-[11.5px] text-[var(--muted)]">Tag</span>
+          {picks.map((n) => (
+            <button
+              key={n}
+              type="button"
+              className="rounded-full border border-[var(--line-2)] px-2 py-0.5 text-[12px] hover:bg-[var(--hover)]"
+              onMouseDown={(e) => e.preventDefault()} // keep typing in the box
+              onClick={() => {
+                const next = value.replace(/@\p{L}*$/u, `@${n} `);
+                onChange(next);
+                requestAnimationFrame(() => box.current?.setSelectionRange(next.length, next.length));
+              }}
+            >
+              @{n}
+            </button>
+          ))}
+        </div>
+      )}
+      {(tags.tagged.length > 0 || tags.missed.length > 0) && (
+        <div className="px-3 pb-1.5 text-[11.5px]">
+          {tags.tagged.length > 0 && <span className="text-[var(--green)]">Will tag {tags.tagged.map((n) => `@${n}`).join(", ")}</span>}
+          {tags.tagged.length > 0 && tags.missed.length > 0 && <span className="text-[var(--muted)]"> · </span>}
+          {tags.missed.length > 0 && <span className="text-[var(--amber)]">Not in this group: {tags.missed.map((n) => `@${n}`).join(", ")}</span>}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-1 px-2 pb-2">
         <button
           className={`grid h-7 w-7 place-items-center rounded-full ${voice.listening ? "pulse-ring bg-[var(--red)] text-white" : "bg-[#171717] text-white"}`}
@@ -174,7 +213,7 @@ export default function WaitingCard({ c, now, compact = false, onDone }: { c: Co
               onChange={(v) => (setText(v), setEditing(true))}
               busy={busy}
               setBusy={setBusy}
-              placeholder={state?.connections.gemini && !c.suggestion ? "Writing a suggestion… or type / speak what to say, then Generate" : "Type or speak a reply, or an instruction like “tell him Friday, tag @TuLab”, then Generate"}
+              placeholder={state?.connections.gemini && !c.suggestion ? "Writing a suggestion… or type / speak what to say, then Generate" : "Type or speak a reply, or an instruction like “tell him Friday, tag @Tulaib”, then Generate"}
             />
           </div>
 

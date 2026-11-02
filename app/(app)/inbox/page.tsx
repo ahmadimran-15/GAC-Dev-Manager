@@ -511,7 +511,7 @@ function Inbox() {
                 setBusy={setBusy}
                 rows={2}
                 onSubmit={() => doSend(reply)}
-                placeholder={`Reply on ${CHANNELS[c.channel]?.label ?? c.channel}… or type / speak an instruction (e.g. “say Friday, tag @TuLab”) and press Generate`}
+                placeholder={`Reply on ${CHANNELS[c.channel]?.label ?? c.channel}… or type / speak an instruction (e.g. “say Friday, tag @Tulaib”) and press Generate`}
               />
               <div>
                 <div className="flex items-center gap-1.5 pt-2">

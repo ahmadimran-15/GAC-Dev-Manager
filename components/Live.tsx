@@ -112,8 +112,9 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   const send = useCallback(
     async (convId: string, text: string, ack = false, from: string | null = null) => {
       try {
-        const r = await api<{ simulated: boolean; name: string; channel: string; via: string | null }>(`/api/conversations/${convId}`, { action: "send", text, ack, from });
-        toast(`${ack ? "Acknowledged" : "Sent to"} ${r.name}${r.via ? ` from ${r.via}` : ""}${r.simulated ? " (test mode, not delivered)" : ""}`);
+        const r = await api<{ simulated: boolean; name: string; channel: string; via: string | null; untagged?: string[] }>(`/api/conversations/${convId}`, { action: "send", text, ack, from });
+        if (r.untagged?.length) toast(`Sent to ${r.name}, but couldn't tag ${r.untagged.map((n) => `@${n}`).join(", ")}: not a saved contact in this group`, "error");
+        else toast(`${ack ? "Acknowledged" : "Sent to"} ${r.name}${r.via ? ` from ${r.via}` : ""}${r.simulated ? " (test mode, not delivered)" : ""}`);
         await refresh();
         return true;
       } catch (e) {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getConversation, getMessages, summarize, updateConversation } from "@/lib/store";
 import { all } from "@/lib/db";
-import { sendToConversation } from "@/lib/inbound";
+import { previewTags, sendToConversation, warmTagging } from "@/lib/inbound";
 import { generateReply, suggestReply, summarizeConversation } from "@/lib/ai";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +10,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const { id } = await params;
   const c = await getConversation(id);
   if (!c) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  warmTagging(id).catch(() => {}); // so "@Name" in a reply here doesn't wait for the member list
   const [summary, messages, drafts, links] = await Promise.all([
     summarize(id),
     getMessages(id),
@@ -57,6 +58,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         // "Not a client": personal or team chats stay in the inbox but never wait or remind
         await updateConversation(id, { internal: body.value ? 1 : 0 });
         return NextResponse.json({ ok: true });
+      case "tags":
+        return NextResponse.json(await previewTags(id, String(body.text ?? "")));
       case "generate":
         return NextResponse.json({ text: await generateReply(id, String(body.input ?? "")) });
       case "context":
