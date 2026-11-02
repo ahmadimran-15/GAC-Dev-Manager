@@ -40,9 +40,9 @@ function Row({ a, onChange, presets }: { a: AccountLite; onChange: () => void; p
   };
   return (
     <div>
-    <div className="flex items-center gap-3 py-3">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3">
       <span className="dot" style={{ background: !a.enabled ? "#cfcfca" : a.status?.ok ? "var(--green)" : a.status ? "var(--red)" : "#cfcfca" }} />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 max-md:basis-[calc(100%-24px)]">
         <div className="truncate text-[14px]">
           <span className="font-medium">{a.label}</span>
           {a.label !== a.address && <span className="text-[var(--muted)]"> · {a.kind === "whatsapp" && /^\d+$/.test(a.address) ? `+${a.address}` : a.address}</span>}

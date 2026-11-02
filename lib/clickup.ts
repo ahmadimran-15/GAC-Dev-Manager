@@ -126,6 +126,14 @@ export async function board(force = false): Promise<Board> {
   }
 }
 
+// Every project name in every folder (Current Projects, Loom Videos, Pending From Client, ...).
+// force re-reads the folders from ClickUp, so new or renamed projects show up straight away.
+export async function allProjects(force = false): Promise<Project[]> {
+  if (!token()) return DEMO_PROJECTS.map((p) => ({ id: p, name: p, owner: null, stage: "Current Projects", current: true }));
+  if (force) structureCache = null;
+  return (await structure()).projects;
+}
+
 export async function allMembers() {
   if (!token()) return DEMO_TEAM;
   return (await structure()).members.map((m) => m.username);

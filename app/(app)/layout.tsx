@@ -6,7 +6,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <LiveProvider>
       <TopNav />
-      <main>{children}</main>
+      <main className="app-main">{children}</main>
       <Assistant />
     </LiveProvider>
   );

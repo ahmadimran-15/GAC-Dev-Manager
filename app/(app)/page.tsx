@@ -18,9 +18,9 @@ type TeamBoard = Board & {
 
 function Stat({ label, value, hint, alert }: { label: string; value: React.ReactNode; hint?: string; alert?: boolean }) {
   return (
-    <div className="px-6 py-5 first:pl-0">
+    <div className="min-w-0 border-[var(--line)] px-4 py-4 max-md:even:border-l max-md:[&:nth-child(n+3)]:border-t md:px-6 md:py-5 md:first:pl-0">
       <div className="eyebrow">{label}</div>
-      <div className={`tnum mt-1 text-[28px] font-semibold leading-tight tracking-tight ${alert ? "text-[var(--red)]" : ""}`}>{value}</div>
+      <div className={`tnum mt-1 text-[24px] md:text-[28px] font-semibold leading-tight tracking-tight ${alert ? "text-[var(--red)]" : ""}`}>{value}</div>
       {hint && <div className="mt-0.5 text-[12.5px] text-[var(--muted)]">{hint}</div>}
     </div>
   );
@@ -51,25 +51,25 @@ export default function Overview() {
   const oldest = waiting[0];
 
   return (
-    <div className="fade-in mx-auto max-w-[1240px] px-6 pb-20 pt-10">
+    <div className="fade-in mx-auto max-w-[1240px] px-4 pb-20 pt-6 md:px-6 md:pt-10">
       <div className="eyebrow">{date || " "}</div>
-      <h1 className="mt-1 text-[30px] font-semibold tracking-tight">
+      <h1 className="mt-1 text-[24px] font-semibold leading-tight tracking-tight md:text-[30px]">
         {waiting.length ? `${waiting.length} client${waiting.length > 1 ? "s are" : " is"} waiting for you.` : "You're all caught up."}
       </h1>
-      <p className="mt-1 text-[15px] text-[var(--ink-2)]">
+      <p className="mt-1 text-[14px] text-[var(--ink-2)] md:text-[15px]">
         {oldest?.waitingSince
           ? `${oldest.name} has waited longest (${duration(mins(oldest.waitingSince, now))}). Replies are already drafted below.`
           : "No client is waiting for a reply right now."}
       </p>
 
-      <div className="mt-8 grid grid-cols-2 divide-x divide-[var(--line)] border-y border-[var(--line)] md:grid-cols-4">
+      <div className="mt-6 grid grid-cols-2 border-y border-[var(--line)] md:mt-8 md:grid-cols-4 md:divide-x md:divide-[var(--line)]">
         <Stat label="Waiting for a reply" value={waiting.length} alert={waiting.some((c) => c.waitingSince && mins(c.waitingSince, now) >= 30)} hint={waiting.length ? `${waiting.filter((c) => c.waitingSince && mins(c.waitingSince, now) >= 30).length} over 30 minutes` : "Nobody"} />
         <Stat label="First reply today" value={state.stats.firstReplyAvg !== null ? `${state.stats.firstReplyAvg}m` : "—"} hint={`${state.stats.repliesToday} conversation${state.stats.repliesToday === 1 ? "" : "s"} answered`} />
         <Stat label="Tasks in progress" value={board ? active.length : "—"} hint={board ? `${blocked.length} blocked · ${open.length} open` : ""} />
         <Stat label="Team drafts" value={state.drafts.length} hint="waiting for your approval" />
       </div>
 
-      <div className="mt-10 grid gap-12 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="mt-10 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1fr)_340px]">
         <Section title="Waiting for you" count={waiting.length} right={<Link href="/inbox" className="text-[13px] text-[var(--ink-2)] hover:text-[var(--ink)]">Open inbox →</Link>}>
           <div className="space-y-3">
             {waiting.map((c) => (

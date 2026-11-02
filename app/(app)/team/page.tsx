@@ -383,7 +383,7 @@ export default function Team() {
   const perf = new Map((data?.performance ?? []).map((p) => [p.person, p]));
 
   return (
-    <div className="fade-in mx-auto max-w-[1240px] px-6 pb-20 pt-10">
+    <div className="fade-in mx-auto max-w-[1240px] px-4 pb-20 pt-6 md:px-6 md:pt-10">
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-[30px] font-semibold tracking-tight">Team</h1>
@@ -492,7 +492,7 @@ export default function Team() {
         })}
       </div>
 
-      <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="mt-10 grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-10">
           {/* Tasks */}
           <div>

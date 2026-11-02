@@ -14,6 +14,14 @@
   --amber: #c27c0e;
   --green: #2f9e66;
   --blue: #2a78d6;
+  /* Whole-UI scale. Laptops: 100% browser zoom looks like 90%. Phones stay at 100%.
+     Zoom also shrinks vh/vw, so full-height sizes divide by it: calc(100vh/var(--ui-zoom)) */
+  --ui-zoom: 1;
+}
+
+@media (min-width: 768px) {
+  :root { --ui-zoom: 0.9; }
+  html { zoom: var(--ui-zoom); }
 }
 
 html,
@@ -28,6 +36,14 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  /* Long links and IDs without spaces wrap instead of pushing cards and columns wider */
+  overflow-wrap: anywhere;
+}
+
+/* Phones: leave room for the bottom tab bar */
+@media (max-width: 767px) {
+  .app-main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 }
 
 ::selection { background: #171717; color: #fff; }

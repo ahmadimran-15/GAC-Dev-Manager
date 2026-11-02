@@ -25,7 +25,7 @@ function Login() {
   }
 
   return (
-    <div className="grid min-h-screen place-items-center px-6">
+    <div className="grid min-h-[calc(100vh/var(--ui-zoom))] place-items-center px-6">
       <form onSubmit={submit} className="w-full max-w-[360px]">
         <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#171717] text-[16px] font-bold text-white">G</span>
         <h1 className="mt-6 text-[24px] font-semibold tracking-tight">Sign in to GAC Desk</h1>

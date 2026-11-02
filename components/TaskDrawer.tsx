@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Loader2, Mic, Sparkles, Square, X } from "lucide-react";
 import { api, useLive } from "@/components/Live";
 import { VOICE_LANGS, useVoice } from "@/lib/use-voice";
+import ProjectPicker from "@/components/ProjectPicker";
 
 export interface BoardLite {
   team: string[];
@@ -113,12 +114,12 @@ export default function TaskDrawer({
                 value={voice.interim ? `${instructions} ${voice.interim}` : instructions}
                 onChange={(e) => setInstructions(e.target.value)}
               />
-              <div className="flex items-center gap-1 px-2 pb-2">
+              <div className="flex flex-wrap items-center gap-1 px-2 pb-2">
                 <button className={`grid h-7 w-7 place-items-center rounded-full ${voice.listening ? "pulse-ring bg-[var(--red)] text-white" : "bg-[#171717] text-white"}`} onClick={() => (voice.listening ? voice.stop() : voice.start(lang))}>
                   {voice.listening ? <Square size={10} fill="currentColor" /> : <Mic size={13} />}
                 </button>
                 {VOICE_LANGS.map((l) => (
-                  <button key={l.code} onClick={() => setLang(l.code)} className={`rounded-full px-2 text-[11.5px] ${lang === l.code ? "bg-[var(--hover)] font-medium" : "text-[var(--muted)]"}`}>
+                  <button key={l.code} onClick={() => setLang(l.code)} className={`shrink-0 whitespace-nowrap rounded-full px-2 text-[11.5px] ${lang === l.code ? "bg-[var(--hover)] font-medium" : "text-[var(--muted)]"}`}>
                     {l.label}
                   </button>
                 ))}
@@ -135,12 +136,11 @@ export default function TaskDrawer({
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <label className="block">
+            <div>
               <span className="eyebrow">Project</span>
-              <input className="input mt-1" list="projects" value={project} onChange={(e) => setProject(e.target.value)} placeholder="Current project" />
-              <datalist id="projects">{projects.map((p) => <option key={p} value={p} />)}</datalist>
-              {isNewProject && <span className="mt-1 block text-[11.5px] text-[var(--amber)]">New project: a list will be created in Current Projects</span>}
-            </label>
+              <ProjectPicker value={project} onChange={setProject} fallback={projects} />
+              {isNewProject && <span className="mt-1 block text-[11.5px] text-[var(--amber)]">Not in Current Projects yet: a list with this name will be created there</span>}
+            </div>
             <label className="block">
               <span className="eyebrow">Assignee</span>
               <select className="input mt-1" value={assignee} onChange={(e) => setAssignee(e.target.value)}>

@@ -118,7 +118,7 @@ export default function Assistant() {
 
   return (
     <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/20 px-4 pt-[8vh] backdrop-blur-[2px]" onClick={() => setAssistantOpen(false)}>
-      <div className="pop-in flex max-h-[84vh] w-full max-w-[680px] flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-white shadow-[0_30px_80px_-20px_rgba(0,0,0,0.35)]" onClick={(e) => e.stopPropagation()}>
+      <div className="pop-in flex max-h-[calc(84vh/var(--ui-zoom))] w-full max-w-[680px] flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-white shadow-[0_30px_80px_-20px_rgba(0,0,0,0.35)]" onClick={(e) => e.stopPropagation()}>
         {/* Conversation */}
         <div className="scroll min-h-0 flex-1 bg-[var(--bg)] px-5 py-4">
           {!turns.length && (

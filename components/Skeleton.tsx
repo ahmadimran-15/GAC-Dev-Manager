@@ -1,5 +1,5 @@
 // Shimmering placeholders shaped like each page, shown while data loads.
-const S = ({ w, h = 12, className = "" }: { w: number | string; h?: number; className?: string }) => <div className={`skel ${className}`} style={{ width: w, height: h }} />;
+const S = ({ w, h = 12, className = "" }: { w: number | string; h?: number; className?: string }) => <div className={`skel max-w-full ${className}`} style={{ width: w, height: h }} />;
 
 export function Loader({ label = "Loading" }: { label?: string }) {
   return (
@@ -42,20 +42,20 @@ function CardSkel() {
 
 export function OverviewSkeleton() {
   return (
-    <div className="mx-auto max-w-[1240px] px-6 pb-20 pt-10">
+    <div className="mx-auto max-w-[1240px] px-4 pb-20 pt-6 md:px-6 md:pt-10">
       <S w={130} h={11} />
       <S w={420} h={30} className="mt-3" />
       <S w={360} h={14} className="mt-3" />
-      <div className="mt-8 grid grid-cols-2 divide-x divide-[var(--line)] border-y border-[var(--line)] md:grid-cols-4">
+      <div className="mt-6 grid grid-cols-2 border-y border-[var(--line)] md:mt-8 md:grid-cols-4 md:divide-x md:divide-[var(--line)]">
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="space-y-2.5 px-6 py-5 first:pl-0">
+          <div key={i} className="min-w-0 space-y-2.5 border-[var(--line)] px-4 py-4 max-md:even:border-l max-md:[&:nth-child(n+3)]:border-t md:px-6 md:py-5 md:first:pl-0">
             <S w={110} h={10} />
             <S w={60} h={26} />
             <S w={130} h={10} />
           </div>
         ))}
       </div>
-      <div className="mt-10 grid gap-12 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="mt-10 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-3">
           <S w={130} h={13} className="mb-4" />
           <CardSkel />

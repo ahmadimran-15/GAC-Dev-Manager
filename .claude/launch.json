@@ -13,6 +13,13 @@
       "runtimeArgs": ["next", "start", "-p", "3100"],
       "env": { "NEXT_DIST_DIR": ".next-test", "DISABLE_WORKER": "1" },
       "port": 3100
+    },
+    {
+      "name": "ui-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev", "-p", "3200"],
+      "env": { "NEXT_DIST_DIR": ".next-dev", "DISABLE_WORKER": "1" },
+      "port": 3200
     }
   ]
 }

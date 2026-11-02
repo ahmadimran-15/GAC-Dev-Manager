@@ -1,8 +1,9 @@
 "use client";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Check, CheckCheck, ChevronDown, ChevronUp, ListPlus, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, ChevronDown, ChevronUp, ListPlus, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
 import Composer from "@/components/Composer";
+import MessageText, { plainText } from "@/components/MessageText";
 import type { ConvSummary, Message } from "@/lib/store";
 import { api, useLive, type DraftRow } from "@/components/Live";
 import { Avatar, CHANNELS, Channel, Pill, STATUS_TONE, Waiting, ago } from "@/components/ui";
@@ -108,6 +109,8 @@ function Inbox() {
   );
   const mailboxes = (state?.accounts ?? []).filter((a) => a.kind === "email");
   const id = params.get("c") ?? state?.conversations[0]?.id ?? null;
+  // Phone: one pane at a time, the list until a chat is tapped, then the chat with a back arrow
+  const chosen = !!params.get("c");
   const now = state?.now ?? Date.now();
 
   // Opening a chat marks it as seen up to its latest message
@@ -227,15 +230,15 @@ function Inbox() {
   }, [c?.id, stale, showContext]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="mx-auto max-w-[1240px] px-6 py-6">
-      <div className="card grid h-[calc(100vh-104px)] min-h-[560px] grid-cols-[320px_minmax(0,1fr)] overflow-hidden">
+    <div className="mx-auto max-w-[1240px] md:px-6 md:py-6">
+      <div className="card grid h-[calc(100dvh-120px-env(safe-area-inset-bottom))] grid-cols-1 overflow-hidden max-md:!rounded-none max-md:!border-0 md:h-[calc(100vh/var(--ui-zoom)-104px)] md:min-h-[560px] md:grid-cols-[280px_minmax(0,1fr)] lg:grid-cols-[320px_minmax(0,1fr)]">
         {/* List */}
-        <div className="flex min-h-0 flex-col border-r border-[var(--line)]">
+        <div className={`min-h-0 flex-col border-r border-[var(--line)] ${chosen ? "hidden md:flex" : "flex"}`}>
           <div className="space-y-2.5 p-4">
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-                <input className="input !py-2 pl-9 text-[13.5px]" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+                <input className="input !py-2 !pl-9 text-[13.5px]" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
               </div>
               <button className="btn btn-dark !h-[38px] !px-3" title="New message to a WhatsApp group, contact or email" onClick={() => setComposing(true)}>
                 <PenSquare size={15} />
@@ -291,7 +294,7 @@ function Inbox() {
                     <Channel c={x.channel} withLabel={false} />
                     <span className={`truncate text-[13px] ${x.waiting || unread ? "text-[var(--ink)]" : "text-[var(--muted)]"}`}>
                       {x.last?.direction === "out" ? (x.repliedBy ? `${x.repliedBy.name}: ` : "You: ") : ""}
-                      {x.last?.text}
+                      {plainText(x.last?.text)}
                     </span>
                   </div>
                   {(x.repliedBy || x.internal) && (
@@ -310,10 +313,13 @@ function Inbox() {
 
         {/* Thread */}
         {c ? (
-          <div className="flex min-h-0 flex-col">
-            <div className="space-y-2.5 border-b border-[var(--line)] px-6 py-3.5">
+          <div className={`min-h-0 flex-col ${chosen ? "flex" : "hidden md:flex"}`}>
+            <div className="space-y-2.5 border-b border-[var(--line)] px-4 py-3 md:px-6 md:py-3.5">
               {/* Who + actions */}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <button className="btn btn-ghost !h-9 !w-9 shrink-0 !p-0 md:hidden" title="All chats" onClick={() => router.replace("/inbox")}>
+                  <ArrowLeft size={18} />
+                </button>
                 <Avatar name={c.name} size={38} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-semibold">
@@ -386,14 +392,14 @@ function Inbox() {
 
             {/* What's going on in this chat, written by Gemini (can be hidden) */}
             {showContext ? (
-              <div className="flex items-start gap-3 border-b border-[var(--line)] bg-[var(--bg)]/60 px-6 py-3">
+              <div className="flex items-start gap-3 border-b border-[var(--line)] bg-[var(--bg)]/60 px-4 py-3 md:px-6">
                 <Sparkles size={14} className="mt-0.5 shrink-0 text-[var(--muted)]" />
                 <div className="min-w-0 flex-1">
                   <div className="mb-0.5 flex items-center gap-2 text-[11.5px] font-medium uppercase tracking-wide text-[var(--muted)]">
                     Context
                     {c.contextAt && <span className="normal-case tracking-normal">· {ago(c.contextAt, now)}</span>}
                   </div>
-                  <p className="max-h-[120px] overflow-y-auto whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--ink-2)]">
+                  <p className="max-h-[4.2rem] overflow-y-auto whitespace-pre-wrap text-[13px] md:max-h-[120px] leading-relaxed text-[var(--ink-2)]">
                     {contextBusy && !c.context ? "Reading the conversation…" : (c.context ?? "No summary yet.")}
                   </p>
                 </div>
@@ -407,7 +413,7 @@ function Inbox() {
                 </div>
               </div>
             ) : (
-              <button className="flex w-full items-center gap-2 border-b border-[var(--line)] bg-[var(--bg)]/60 px-6 py-1.5 text-left text-[12.5px] text-[var(--ink-2)] hover:bg-[var(--bg)]" onClick={() => toggleContext(true)}>
+              <button className="flex w-full items-center gap-2 border-b border-[var(--line)] bg-[var(--bg)]/60 px-4 py-1.5 text-left md:px-6 text-[12.5px] text-[var(--ink-2)] hover:bg-[var(--bg)]" onClick={() => toggleContext(true)}>
                 <Sparkles size={13} className="text-[var(--muted)]" /> Context hidden
                 <span className="ml-auto inline-flex items-center gap-1 font-medium text-[var(--ink)]">
                   <ChevronDown size={13} /> Show
@@ -416,7 +422,7 @@ function Inbox() {
             )}
 
             {selecting && (
-              <div className="flex items-center justify-between bg-[var(--bg)] px-6 py-2 text-[13px] text-[var(--ink-2)]">
+              <div className="flex items-center justify-between bg-[var(--bg)] px-4 py-2 text-[13px] md:px-6 text-[var(--ink-2)]">
                 Tick the messages that belong in this task.
                 <button className="btn btn-ghost btn-sm" onClick={() => (setSelecting(false), setSel(new Set()))}>
                   <X size={13} /> Cancel
@@ -424,7 +430,7 @@ function Inbox() {
               </div>
             )}
 
-            <div className="scroll min-h-0 flex-1 px-6 py-5">
+            <div className="scroll min-h-0 flex-1 px-3 py-4 md:px-6 md:py-5">
               {detail.messages.map((m, i) => {
                 const mine = m.direction === "out";
                 const newDay = i === 0 || dayLabel(detail.messages[i - 1].created_at) !== dayLabel(m.created_at);
@@ -438,7 +444,7 @@ function Inbox() {
                           {picked && <CheckCheck size={11} />}
                         </button>
                       )}
-                      <div className={`max-w-[70%] ${mine ? "items-end text-right" : ""} flex flex-col`}>
+                      <div className={`max-w-[85%] md:max-w-[70%] ${mine ? "items-end text-right" : ""} flex flex-col`}>
                         <div
                           dir="auto"
                           onClick={() => !mine && selecting && toggle(m.id)}
@@ -456,7 +462,7 @@ function Inbox() {
                             </div>
                           )}
                           {m.kind === "voice" && m.media_path && <audio controls src={`/api/media/${m.media_path}`} className="mb-2 h-9 w-64 max-w-full" />}
-                          {text(m) || (m.kind === "voice" ? <span className="italic text-[var(--muted)]">{state?.connections.transcription ? "Transcribing…" : "Add GOOGLE_AI_API_KEY to transcribe voice notes"}</span> : null)}
+                          {text(m) ? <MessageText text={text(m)} dark={mine && !m.ack} /> : (m.kind === "voice" ? <span className="italic text-[var(--muted)]">{state?.connections.transcription ? "Transcribing…" : "Add GOOGLE_AI_API_KEY to transcribe voice notes"}</span> : null)}
                         </div>
                         <div className="mt-1 px-1 text-[11px] text-[var(--muted)]">
                           {mine && m.ack ? "Acknowledged · " : ""}
@@ -479,11 +485,11 @@ function Inbox() {
               <div ref={endRef} />
             </div>
 
-            <div className="border-t border-[var(--line)] px-6 py-4">
+            <div className="border-t border-[var(--line)] px-3 py-3 md:px-6 md:py-4">
               {c.waiting && c.suggestion && !reply && (
-                <div className="mb-3 flex items-start gap-3 rounded-xl bg-[var(--bg)] px-4 py-3">
+                <div className="mb-3 flex items-start gap-3 rounded-xl bg-[var(--bg)] px-3 py-2.5 md:px-4 md:py-3">
                   <Sparkles size={14} className="mt-1 shrink-0 text-[var(--muted)]" />
-                  <p className="flex-1 text-[13.5px] leading-relaxed text-[var(--ink-2)]">{c.suggestion}</p>
+                  <p className="flex-1 text-[13.5px] leading-relaxed text-[var(--ink-2)] max-md:line-clamp-2">{c.suggestion}</p>
                   <div className="flex shrink-0 gap-1">
                     <button className="btn btn-ghost btn-sm !px-2" title="Write another" onClick={() => action({ action: "suggest" })}>
                       <RotateCw size={13} />
@@ -523,7 +529,7 @@ function Inbox() {
             </div>
           </div>
         ) : (
-          state?.conversations.length === 0 ? <div className="grid place-items-center text-[var(--muted)]">No conversations yet</div> : <ThreadSkeleton />
+          state?.conversations.length === 0 ? <div className="hidden place-items-center text-[var(--muted)] md:grid">No conversations yet</div> : <div className={chosen ? "" : "hidden md:block"}><ThreadSkeleton /></div>
         )}
       </div>
 

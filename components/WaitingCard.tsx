@@ -6,6 +6,7 @@ import { VOICE_LANGS, useVoice } from "@/lib/use-voice";
 import type { ConvSummary } from "@/lib/store";
 import { accountOf, api, useLive } from "@/components/Live";
 import { Avatar, Channel, Waiting } from "@/components/ui";
+import MessageText from "@/components/MessageText";
 
 export const ackText = (name: string) => `Hi ${name.split(" ")[0]}, we've received your message and we're on it. I'll update you shortly.`;
 
@@ -71,7 +72,7 @@ export function ReplyBox({
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => onSubmit && (e.ctrlKey || e.metaKey) && e.key === "Enter" && onSubmit()}
       />
-      <div className="flex items-center gap-1 px-2 pb-2">
+      <div className="flex flex-wrap items-center gap-1 px-2 pb-2">
         <button
           className={`grid h-7 w-7 place-items-center rounded-full ${voice.listening ? "pulse-ring bg-[var(--red)] text-white" : "bg-[#171717] text-white"}`}
           title={voice.listening ? "Stop" : "Speak"}
@@ -80,7 +81,7 @@ export function ReplyBox({
           {voice.listening ? <Square size={10} fill="currentColor" /> : <Mic size={13} />}
         </button>
         {VOICE_LANGS.map((l) => (
-          <button key={l.code} onClick={() => setLang(l.code)} className={`rounded-full px-2 text-[11.5px] ${lang === l.code ? "bg-[var(--hover)] font-medium" : "text-[var(--muted)]"}`}>
+          <button key={l.code} onClick={() => setLang(l.code)} className={`shrink-0 whitespace-nowrap rounded-full px-2 text-[11.5px] ${lang === l.code ? "bg-[var(--hover)] font-medium" : "text-[var(--muted)]"}`}>
             {l.label}
           </button>
         ))}
@@ -136,7 +137,7 @@ export default function WaitingCard({ c, now, compact = false, onDone }: { c: Co
   }
 
   return (
-    <div className={compact ? "py-4" : "card p-5"}>
+    <div className={compact ? "py-4" : "card p-4 md:p-5"}>
       <div className="flex items-start gap-3">
         <Avatar name={c.name} size={compact ? 30 : 38} />
         <div className="min-w-0 flex-1">
@@ -153,10 +154,10 @@ export default function WaitingCard({ c, now, compact = false, onDone }: { c: Co
             {c.unanswered > 1 && <span>{c.unanswered} messages</span>}
           </div>
 
-          <p className={`mt-3 leading-relaxed text-[var(--ink)] ${compact ? "line-clamp-2 text-[13.5px]" : "text-[15px]"}`} dir="auto">
+          <div className={`mt-3 leading-relaxed text-[var(--ink)] ${compact ? "line-clamp-3 text-[13.5px]" : "max-h-[16rem] overflow-y-auto text-[15px]"}`}>
             {c.last?.kind === "voice" && <Mic size={14} className="mr-1 inline -translate-y-px text-[var(--muted)]" />}
-            {c.last?.text}
-          </p>
+            <MessageText text={c.last?.text ?? ""} />
+          </div>
 
           <div className="mt-3.5 rounded-xl bg-[var(--bg)] px-3.5 py-3">
             <div className="mb-1 flex items-center justify-between">

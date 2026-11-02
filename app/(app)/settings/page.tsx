@@ -87,7 +87,7 @@ export default function Settings() {
   };
 
   return (
-    <div className="fade-in mx-auto max-w-[820px] px-6 pb-20 pt-10">
+    <div className="fade-in mx-auto max-w-[820px] px-4 pb-20 pt-6 md:px-6 md:pt-10">
       <h1 className="text-[30px] font-semibold tracking-tight">Settings</h1>
       <p className="mt-1 text-[15px] text-[var(--ink-2)]">System health, accounts, logins and reminders.</p>
 

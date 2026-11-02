@@ -4,6 +4,7 @@ import { Bell, BellRing, X } from "lucide-react";
 import { useLive } from "@/components/Live";
 import WaitingCard from "@/components/WaitingCard";
 import { mins } from "@/components/ui";
+import { plainText } from "@/components/MessageText";
 
 const LS = { every: "gac_remind_every", after: "gac_remind_after", snooze: "gac_snooze" };
 const read = (k: string, d: number) => {
@@ -71,7 +72,7 @@ export default function Reminders() {
       if (document.hidden && "Notification" in window && Notification.permission === "granted") {
         const first = due[0];
         new Notification(`${due.length} client${due.length > 1 ? "s" : ""} waiting for your reply`, {
-          body: `${first.name}: ${first.last?.text?.slice(0, 80) ?? ""}`,
+          body: `${first.name}: ${plainText(first.last?.text).slice(0, 80)}`,
           tag: "gac-reminder",
         });
       }
@@ -99,7 +100,7 @@ export default function Reminders() {
     chime();
     toast(`New message from ${fresh.map((c) => c.name).join(", ")}`);
     if ("Notification" in window && Notification.permission === "granted") {
-      for (const c of fresh.slice(0, 3)) new Notification(`New message from ${c.name}`, { body: c.last?.text?.slice(0, 120) ?? "", tag: `gac-${c.id}` });
+      for (const c of fresh.slice(0, 3)) new Notification(`New message from ${c.name}`, { body: plainText(c.last?.text).slice(0, 120), tag: `gac-${c.id}` });
     }
   }, [state?.now]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -127,7 +128,7 @@ export default function Reminders() {
       </button>
 
       {open && (
-        <div className="slide-in fixed right-4 top-16 z-50 flex max-h-[calc(100vh-84px)] w-[440px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-white shadow-[0_20px_60px_-20px_rgba(0,0,0,0.25)]">
+        <div className="slide-in fixed right-4 top-16 z-50 flex max-h-[calc(100vh/var(--ui-zoom)-84px)] w-[440px] max-w-[calc(100vw/var(--ui-zoom)-32px)] flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-white shadow-[0_20px_60px_-20px_rgba(0,0,0,0.25)]">
           <div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-3.5">
             <div>
               <div className="font-semibold">{due.length ? `${due.length} client${due.length > 1 ? "s" : ""} still waiting` : "No one is waiting"}</div>
