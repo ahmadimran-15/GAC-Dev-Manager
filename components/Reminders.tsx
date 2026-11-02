@@ -60,7 +60,10 @@ export default function Reminders() {
   const { after } = typeof window === "undefined" ? { after: 2 } : reminderSettings.get();
   const snoozed = typeof window === "undefined" ? {} : snoozes();
   // A client's own reminder time (set in the inbox thread) wins over the default
-  const due = (state?.conversations ?? []).filter((c) => c.waiting && c.waitingSince && mins(c.waitingSince, now) >= (c.remindAfter ?? after) && !(snoozed[c.id] > Date.now()));
+  const due = (state?.conversations ?? [])
+    // Task comments live in the inbox too, but they're our own team: this is about clients waiting
+    .filter((c) => c.channel !== "clickup" && c.waiting && c.waitingSince && mins(c.waitingSince, now) >= (c.remindAfter ?? after) && !(snoozed[c.id] > Date.now()))
+    .sort((a, b) => (b.last?.at ?? b.waitingSince ?? 0) - (a.last?.at ?? a.waitingSince ?? 0)); // most recent first
 
   useEffect(() => {
     const check = () => {

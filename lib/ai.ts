@@ -223,10 +223,11 @@ export async function draftTicket(messages: string[], instructions: string, proj
 }
 
 export interface Command {
-  intent: "reply" | "task" | "answer" | "search";
+  intent: "reply" | "task" | "project" | "answer" | "search";
   conversation_id?: string;
   reply_text?: string;
   task?: { title: string; description: string; project?: string; assignee?: string; priority?: string };
+  project_move?: { project: string; folder?: string };
   answer?: string;
   source?: "clickup" | "email" | "messages";
   query?: string;
@@ -239,8 +240,9 @@ export async function interpret(command: string, context: string, history: strin
       (history ? `Earlier in this chat:\n${history}\n\n` : "") +
       `Context:\n${context}\n\n` +
       `Pick ONE action. Return ONLY JSON:\n` +
-      `{"intent":"reply"|"task"|"search"|"answer","conversation_id":string?,"reply_text":string?,"task":{"title":string,"description":string,"project":string?,"assignee":string?,"priority":"urgent"|"high"|"normal"|"low"}?,"source":"clickup"|"email"|"messages"?,"query":string?,"answer":string?}\n` +
+      `{"intent":"reply"|"task"|"project"|"search"|"answer","conversation_id":string?,"reply_text":string?,"task":{"title":string,"description":string,"project":string?,"assignee":string?,"priority":"urgent"|"high"|"normal"|"low"}?,"project_move":{"project":string,"folder":string}?,"source":"clickup"|"email"|"messages"?,"query":string?,"answer":string?}\n` +
       `- "reply": send a message to a client. Use the conversation_id from the context. Write reply_text in English, ready to send.\n` +
+      `- "project": the manager wants a whole PROJECT (a ClickUp list) moved into another folder, e.g. "move Does it All to pending from client". project_move.project = the exact project name from the context, project_move.folder = the exact folder name it should end up in (the folder headings in the context: Current Projects, Pending From Client, Loom Videos, Dev Completed Projects, Inter Tasks, Approvals). Moving a PROJECT is never a reply, a comment or a task.\n` +
       `- "task": create a ClickUp task. New tasks can only go in a CURRENT project; use the exact project name and a team member name from the context.\n` +
       `- "search": look something up. source "clickup" for tasks, Loom videos, work updates or comments; "email" for things said in emails; "messages" for WhatsApp/Slack/Teams chats. query = the key words (names, project, topic).\n` +
       `- "answer": ONLY for facts written in the Context above (who is waiting, which stage a project is in, who owns a project). Be brief, in English.\n` +

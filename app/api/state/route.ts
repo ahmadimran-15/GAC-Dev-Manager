@@ -3,7 +3,7 @@ import { get } from "@/lib/db";
 import { firstReplyToday, listConversations, listDrafts } from "@/lib/store";
 import { aiConfigured, transcriptionConfigured } from "@/lib/ai";
 import { sttLabel, whisperConfigured } from "@/lib/stt";
-import { sessionStatus, waAccounts } from "@/lib/whatsapp";
+import { numberNames, sessionStatus, waAccounts, withNames } from "@/lib/whatsapp";
 import { listAccounts, setAccountAddress, setAccountStatus } from "@/lib/accounts";
 import { clickupConfigured } from "@/lib/clickup";
 import { lastHealth } from "@/lib/health";
@@ -42,15 +42,18 @@ export async function GET() {
       lastHealth(),
       currentUser(),
     ]);
+    const names = await numberNames();
     return NextResponse.json({
       now: Date.now(),
       me: me ? { name: me.name, email: me.email, role: me.role } : null,
       health: health ? { at: health.at, problems: health.checks.filter((c) => c.ok === false).map((c) => `${c.name}: ${c.detail}`) } : null,
-      conversations,
+      // "@923…" mentions and "+923…" senders shown as names
+      conversations: conversations.map((c) => (c.last ? { ...c, last: { ...c.last, text: withNames(c.last.text, names) } } : c)),
       drafts,
       accounts,
       stats: {
-        waiting: conversations.filter((c) => c.waiting).length,
+        waiting: conversations.filter((c) => c.waiting && c.channel !== "clickup").length,
+        tasks: conversations.filter((c) => c.channel === "clickup" && c.waiting).length,
         firstReplyAvg: reply.avg,
         repliesToday: reply.count,
       },

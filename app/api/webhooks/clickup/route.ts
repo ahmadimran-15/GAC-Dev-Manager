@@ -25,6 +25,12 @@ export async function POST(req: Request) {
   await kvSet("clickup_last_event", String(Date.now())).catch(() => {});
   invalidateBoard();
 
+  // A comment on a task lands in the inbox, so it can be read and answered there
+  if (body.event === "taskCommentPosted" && body.task_id) {
+    const { syncTaskComments } = await import("@/lib/taskchat");
+    syncTaskComments(String(body.task_id)).catch(() => {});
+  }
+
   if (body.event === "taskStatusUpdated") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const h = (body.history_items ?? []).find((x: any) => x.field === "status") ?? body.history_items?.[0];

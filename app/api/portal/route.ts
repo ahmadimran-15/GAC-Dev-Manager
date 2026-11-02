@@ -4,7 +4,7 @@ import { currentUser } from "@/lib/auth";
 import { addDraft } from "@/lib/store";
 import { board } from "@/lib/clickup";
 import { getUser, updateUser } from "@/lib/users";
-import { minutesByTask, runningTimers, startTimer, stopTimer, timersEnabled } from "@/lib/timers";
+import { minutesByTask, runningTimers, startTimer, stopTask, stopTimer, timersEnabled } from "@/lib/timers";
 
 export const dynamic = "force-dynamic";
 
@@ -38,8 +38,10 @@ export async function GET() {
     now: Date.now(),
     me: { name: me.name, email: me.email, clickupName: cu },
     projects: b.projects,
-    clients: clients.map((c) => ({ id: c.id, label: c.channel === "whatsapp" && /@g\.us$/.test(c.name) ? c.name : c.name.split(" ")[0], project: c.project })),
-    mine: mine.map((d) => ({ ...d, created_at: Number(d.created_at), conv_name: d.conv_name ? d.conv_name.split(" ")[0] : null })),
+    // First names only; a chat saved under a phone number or email never shows it
+    clients: clients
+      .map((c) => ({ id: c.id, label: /^\+?[\d\s()-]{6,}$/.test(c.name) || c.name.includes("@") ? `${c.channel === "email" ? "Email" : "WhatsApp"} client` : c.name.split(" ")[0], project: c.project })),
+    mine: mine.map((d) => ({ ...d, created_at: Number(d.created_at), conv_name: d.conv_name ? (/^\+?[\d\s()-]{6,}$/.test(d.conv_name) || d.conv_name.includes("@") ? "client" : d.conv_name.split(" ")[0]) : null })),
     tasks,
     running: cu ? (running.find((r) => r.person === cu) ?? null) : null,
     timersOn,
@@ -66,7 +68,9 @@ export async function POST(req: Request) {
     if (b.action === "stop") {
       const r = (await runningTimers()).find((t) => t.person === cu);
       if (!r) return NextResponse.json({ error: "No timer is running" }, { status: 404 });
-      return NextResponse.json({ ok: true, timer: await stopTimer(r.id) });
+      const timer = await stopTimer(r.id);
+      await stopTask(r.task_id);
+      return NextResponse.json({ ok: true, timer });
     }
     const t = (await board()).tasks.find((x) => x.id === b.taskId);
     if (!t || t.assignee !== cu) return NextResponse.json({ error: "That task isn't assigned to you" }, { status: 403 });

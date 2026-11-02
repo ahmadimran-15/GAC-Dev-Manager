@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Inbox, LayoutGrid, LogOut, Mic, Settings, Users } from "lucide-react";
+import { Inbox, LayoutGrid, LogOut, Mic, Settings, Sparkles, Users } from "lucide-react";
 import { useLive } from "@/components/Live";
 import Reminders from "@/components/Reminders";
 
@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/", label: "Overview", Icon: LayoutGrid },
   { href: "/inbox", label: "Inbox", Icon: Inbox },
   { href: "/team", label: "Team", Icon: Users },
+  { href: "/assistant", label: "Assistant", Icon: Sparkles },
   { href: "/settings", label: "Settings", Icon: Settings },
 ];
 
@@ -87,7 +88,7 @@ export default function TopNav() {
       </header>
 
       {/* Phone tab bar */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-[var(--line)] bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-[var(--line)] bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden">
         {LINKS.map(({ href, label, Icon }) => {
           const on = isOn(href);
           return (

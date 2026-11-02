@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { createHmac, timingSafeEqual } from "crypto";
-import { MEDIA_DIR } from "@/lib/db";
+import { MEDIA_DIR, get, kvGet, kvSet } from "@/lib/db";
 import { accountsWithSecrets, getAccount, type AccountWithSecret } from "@/lib/accounts";
 import { teamNumbers } from "@/lib/team-numbers";
 
@@ -23,7 +23,8 @@ async function wa<T>(a: AccountWithSecret, p: string, init?: RequestInit, timeou
     cache: "no-store",
   });
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new GatewayError(data?.message ? [data.message].flat().join(", ") : `WhatsApp gateway error ${res.status}`, res.status);
+  const msg = data?.message ?? data?.error?.message; // the gateway uses both shapes
+  if (!res.ok) throw new GatewayError(msg ? [msg].flat().join(", ") : `WhatsApp gateway error ${res.status}`, res.status);
   return data as T;
 }
 
@@ -189,6 +190,33 @@ export async function groupMembers(a: AccountWithSecret, groupId: string, waitMs
   }
   const load = loadMembers(a, groupId);
   return waitMs ? Promise.race([load, new Promise<null>((r) => setTimeout(() => r(null), waitMs))]) : null;
+}
+
+// Phone number → name (saved contacts and team numbers), for showing "@923…" mentions and "+923…" senders as
+// names. Uses the cached contact list only (starts loading it if it isn't there yet), so it never slows a page.
+export async function numberNames(): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  for (const a of await waAccounts()) {
+    await loadSavedContacts(a);
+    const list = contactCache(a);
+    if (!list || !targetCache.get(`${a.id}:contacts`)?.at) listTargets(a, "contacts").catch(() => {});
+    for (const t of list ?? []) if (t.number && t.name && !/^\+?\d+$/.test(t.name)) names.set(t.number, t.name);
+  }
+  for (const t of await teamNumbers()) names.set(t.number, t.name);
+  // Your own WhatsApp numbers are tagged by teammates too: show your name
+  const owner = (await get<{ name: string }>("select name from users where role = 'admin' order by created_at limit 1").catch(() => null))?.name;
+  for (const a of await waAccounts()) if (owner && a.address && /^\d+$/.test(a.address)) names.set(a.address, owner);
+  return names;
+}
+
+// "@923074061626" → "@Tulaib Get AI Chatbots", "+923…: hi" → "Tulaib…: hi". hideUnknown (team views) turns
+// numbers nobody is saved under into "someone", so a phone number is never shown.
+// A number typed inside a message ("call me on +92…") is left as it is.
+export function withNames(text: string, names: Map<string, string>, hideUnknown = false) {
+  const name = (num: string) => names.get(num) ?? (hideUnknown ? "someone" : null);
+  return text
+    .replace(/^\+(\d{8,15}): /, (m, num: string) => (name(num) ? `${name(num)}: ` : m))
+    .replace(/(^|[^\w@])@(\d{8,15})(?!\d)/g, (m, pre: string, num: string) => (name(num) ? `${pre}@${name(num)}` : m));
 }
 
 // Who "@Name" can mean in a chat: saved contacts and team numbers. In a group, `close` = the ones who are
@@ -440,18 +468,26 @@ export interface Target {
 
 const targetCache = new Map<string, { at: number; list: Target[] }>();
 const targetLoads = new Map<string, Promise<Target[]>>();
+const targetFailed = new Map<string, number>();
 const contactCache = (a: AccountWithSecret) => targetCache.get(`${a.id}:contacts`)?.list ?? null;
 
 // Your WhatsApp groups or saved contacts. Cached: after 10 minutes the old list is still answered at once
 // while a fresh one loads in the background (the contact list takes several seconds).
 export async function listTargets(a: AccountWithSecret, type: "groups" | "contacts", refresh = false): Promise<Target[]> {
   const key = `${a.id}:${type}`;
+  if (type === "contacts") await loadSavedContacts(a);
   const hit = targetCache.get(key);
   if (!refresh && hit && Date.now() - hit.at < 10 * 60_000) return hit.list;
+  // WhatsApp down or reconnecting: keep answering with the saved list, try again after 2 minutes
+  if (!refresh && hit && Date.now() - (targetFailed.get(key) ?? 0) < 2 * 60_000) return hit.list;
   let load = targetLoads.get(key);
   if (!load) {
     load = fetchTargets(a, type)
       .catch(() => fetchTargets(a, type)) // one retry: the gateway sometimes drops a call when busy
+      .catch((e) => {
+        targetFailed.set(key, Date.now());
+        throw e;
+      })
       .finally(() => targetLoads.delete(key));
     targetLoads.set(key, load);
   }
@@ -483,15 +519,44 @@ async function fetchTargets(a: AccountWithSecret, type: "groups" | "contacts"): 
   }
   out.sort((x, y) => x.name.localeCompare(y.name));
   targetCache.set(key, { at: Date.now(), list: out });
+  // Kept in the database too, so names show at once after a restart or while WhatsApp reconnects
+  if (type === "contacts" && out.length) kvSet(`wa_contacts:${a.id}`, JSON.stringify(out.map((t) => [t.number, t.name]))).catch(() => {});
   return out;
 }
 
+// The contact list saved last time (used until a fresh one loads)
+const savedTried = new Set<string>();
+async function loadSavedContacts(a: AccountWithSecret) {
+  const key = `${a.id}:contacts`;
+  if (targetCache.has(key) || savedTried.has(key)) return;
+  savedTried.add(key);
+  try {
+    const rows: [string, string][] = JSON.parse((await kvGet(`wa_contacts:${a.id}`)) ?? "[]");
+    if (rows.length && !targetCache.has(key)) targetCache.set(key, { at: 0, list: rows.map(([number, name]) => ({ id: `${number}@c.us`, name, number })) });
+  } catch {
+    /* none saved */
+  }
+}
+
 // Restart a session after the gateway restarted, or fetch the QR code when it needs linking again.
+// A session stuck in "initializing" says "already started": then it's stopped and started again (stop only
+// disconnects; it never unlinks the phone).
 export async function startSession(a: AccountWithSecret) {
   try {
     await wa(a, "/start", { method: "POST" });
   } catch (e) {
     if (!/already started/i.test(e instanceof Error ? e.message : "")) throw e;
+    if ((await sessionStatus(a)).status !== "ready") {
+      await wa(a, "/stop", { method: "POST" });
+      await new Promise((r) => setTimeout(r, 3000));
+      await wa(a, "/start", { method: "POST" });
+    }
+  }
+  // Give it a moment to connect before reporting
+  for (let i = 0; i < 6; i++) {
+    const st = await sessionStatus(a);
+    if (st.status !== "initializing") return st;
+    await new Promise((r) => setTimeout(r, 5000));
   }
   return sessionStatus(a);
 }

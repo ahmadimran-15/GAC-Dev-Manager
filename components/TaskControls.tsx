@@ -96,10 +96,12 @@ export interface RunningTimer {
   project: string | null;
   person: string;
   started_at: number;
+  before_ms?: number; // saved from earlier segments: the clock shows the task's total, not just this run
 }
 
-// Start / stop the timer for a task's assignee (one running timer per person)
-export function TimerButton({ taskId, assignee, running, now, onChanged, startUrl = "/api/timers" }: { taskId: string; assignee: string; running?: RunningTimer; now: number; onChanged: () => void; startUrl?: string }) {
+// Start / stop the timer for a task's assignee (one running timer per person).
+// savedMin: time already tracked on a paused task, so the button reads "Resume · 2h 15m".
+export function TimerButton({ taskId, assignee, running, now, onChanged, startUrl = "/api/timers", savedMin = 0 }: { taskId: string; assignee: string; running?: RunningTimer; now: number; onChanged: () => void; startUrl?: string; savedMin?: number }) {
   const { toast } = useLive();
   const [busy, setBusy] = useState(false);
   if (assignee === "Unassigned" && !running) return null;
@@ -112,7 +114,7 @@ export function TimerButton({ taskId, assignee, running, now, onChanged, startUr
         setBusy(true);
         try {
           await api(startUrl, running ? { action: "stop", id: running.id } : { action: "start", taskId });
-          toast(running ? `Stopped · ${clock(running.started_at, Date.now())}` : `Timer started for ${assignee}`);
+          toast(running ? `Paused · ${clock(running.started_at - (running.before_ms ?? 0), Date.now())} saved on this task` : savedMin ? `Resumed for ${assignee} from ${hm(savedMin)}` : `Timer started for ${assignee}`);
           onChanged();
         } catch (err) {
           toast(err instanceof Error ? err.message : "Failed", "error");
@@ -122,7 +124,7 @@ export function TimerButton({ taskId, assignee, running, now, onChanged, startUr
       }}
     >
       {running ? <Pause size={12} /> : <Play size={12} />}
-      <span className="tnum">{running ? clock(running.started_at, now) : "Start"}</span>
+      <span className="tnum">{running ? clock(running.started_at - (running.before_ms ?? 0), now) : savedMin >= 1 ? `Resume · ${hm(Math.round(savedMin))}` : "Start"}</span>
     </button>
   );
 }

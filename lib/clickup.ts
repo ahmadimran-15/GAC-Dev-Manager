@@ -11,15 +11,39 @@ export const clickupConfigured = () => !!token();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
-async function cu<T = Any>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
+// ClickUp allows 100 requests a minute per token. We stay under that ourselves, so a busy moment
+// (a board refresh while the assistant searches) never returns "Rate limit reached" to the dashboard.
+const LIMIT_PER_MIN = Number(process.env.CLICKUP_RATE_LIMIT ?? 85);
+const calls: number[] = [];
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function slot() {
+  for (;;) {
+    const cutoff = Date.now() - 60_000;
+    while (calls.length && calls[0] < cutoff) calls.shift();
+    if (calls.length < LIMIT_PER_MIN) {
+      calls.push(Date.now());
+      return;
+    }
+    await wait(Math.max(250, calls[0] + 60_000 - Date.now()));
+  }
+}
+
+async function cu<T = Any>(path: string, init?: RequestInit, retry = true, version: "v2" | "v3" = "v2"): Promise<T> {
+  await slot();
+  const res = await fetch(`${version === "v3" ? API.replace("/v2", "/v3") : API}${path}`, {
     ...init,
     headers: { Authorization: token()!, "Content-Type": "application/json", ...(init?.headers ?? {}) },
     signal: AbortSignal.timeout(30_000),
     cache: "no-store",
   });
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.err ?? `ClickUp error ${res.status}`);
+  if (res.status === 429 && retry) {
+    // Something else is using the same token: wait the time ClickUp asks for, then try once more
+    await wait(Math.min(60_000, (Number(res.headers.get("retry-after")) || 20) * 1000));
+    return cu<T>(path, init, false, version);
+  }
+  // Always say which service failed, so "Rate limit reached" can't look like Gemini or WhatsApp
+  if (!res.ok) throw new Error(`ClickUp: ${data?.err ?? `error ${res.status}`}`);
   return data as T;
 }
 
@@ -42,27 +66,59 @@ export interface Board {
 
 const teamId = async () => process.env.CLICKUP_TEAM_ID || String((await cu<{ teams: Any[] }>("/team")).teams[0].id);
 
-let structureCache: { at: number; data: { projects: Project[]; currentFolderId: string | null; members: { id: number; username: string }[] } } | null = null;
+let structureCache: { at: number; data: { projects: Project[]; currentFolderId: string | null; folders: { id: string; name: string; lists: number; current: boolean }[]; members: { id: number; username: string }[] } } | null = null;
+
+// Which folders and single projects count as "current" in GAC Desk, on top of the Current Projects folder.
+// ClickUp's API can't move a list into another folder, so a project is brought up by marking it here.
+// Folders start as current by default: Loom Videos sits under Current Projects in the way the team works.
+const DEFAULT_FOLDERS = ["loom videos"];
+type Marks = { folders: string[]; lists: string[]; off: string[] };
+const marks = async (): Promise<Marks> => ({ folders: [], lists: [], off: [], ...JSON.parse((await kvGet("current_marks")) ?? "{}") });
+
+export async function markCurrent(kind: "folder" | "project", id: string, on: boolean) {
+  const m = await marks();
+  const key = kind === "folder" ? "folders" : "lists";
+  m[key] = m[key].filter((x) => x !== id);
+  m.off = m.off.filter((x) => x !== id);
+  if (on) m[key].push(id);
+  else m.off.push(id); // off also switches off a default (Loom Videos) or the Current Projects folder itself
+  await kvSet("current_marks", JSON.stringify(m));
+  structureCache = null;
+  invalidateBoard();
+  return m;
+}
 
 async function structure() {
   if (structureCache && Date.now() - structureCache.at < 10 * 60_000) return structureCache.data;
   const team = await teamId();
   const currentName = (process.env.CLICKUP_CURRENT_FOLDER || "Current Projects").toLowerCase();
+  const m = await marks();
   const projects: Project[] = [];
+  const folders: { id: string; name: string; lists: number; current: boolean }[] = [];
   let currentFolderId: string | null = process.env.CLICKUP_CURRENT_FOLDER_ID || null;
   const { spaces } = await cu<{ spaces: Any[] }>(`/team/${team}/space?archived=false`);
   for (const s of spaces) {
-    const { folders } = await cu<{ folders: Any[] }>(`/space/${s.id}/folder?archived=false`);
-    for (const f of folders) {
-      const isCurrent = currentFolderId ? String(f.id) === currentFolderId : f.name.toLowerCase() === currentName;
-      if (isCurrent) currentFolderId = String(f.id);
-      for (const l of f.lists) projects.push({ id: String(l.id), name: l.name.trim(), owner: l.status?.status ?? null, stage: f.name, current: isCurrent });
+    const { folders: fs } = await cu<{ folders: Any[] }>(`/space/${s.id}/folder?archived=false`);
+    for (const f of fs) {
+      const id = String(f.id);
+      const isMain = currentFolderId ? id === currentFolderId : f.name.toLowerCase() === currentName;
+      if (isMain) currentFolderId = id;
+      const isCurrent = !m.off.includes(id) && (isMain || m.folders.includes(id) || DEFAULT_FOLDERS.includes(f.name.toLowerCase()));
+      folders.push({ id, name: f.name, lists: f.lists.length, current: isCurrent });
+      for (const l of f.lists)
+        projects.push({
+          id: String(l.id),
+          name: l.name.trim(),
+          owner: l.status?.status ?? null,
+          stage: f.name,
+          current: !m.off.includes(String(l.id)) && (isCurrent || m.lists.includes(String(l.id))),
+        });
     }
   }
   const { teams } = await cu<{ teams: Any[] }>("/team");
   const ws = teams.find((x) => String(x.id) === team) ?? teams[0];
   const members = ws.members.map((m: Any) => ({ id: m.user.id, username: m.user.username })).filter((m: Any) => m.username);
-  structureCache = { at: Date.now(), data: { projects, currentFolderId, members } };
+  structureCache = { at: Date.now(), data: { projects, currentFolderId, folders, members } };
   return structureCache.data;
 }
 
@@ -130,7 +186,10 @@ export async function board(force = false): Promise<Board> {
 // force re-reads the folders from ClickUp, so new or renamed projects show up straight away.
 export async function allProjects(force = false): Promise<Project[]> {
   if (!token()) return DEMO_PROJECTS.map((p) => ({ id: p, name: p, owner: null, stage: "Current Projects", current: true }));
-  if (force) structureCache = null;
+  if (force) {
+    structureCache = null;
+    invalidateBoard(); // a project added or renamed in ClickUp also changes the task board
+  }
   return (await structure()).projects;
 }
 
@@ -240,6 +299,32 @@ export async function markInProgress(taskId: string) {
   return { from: s.current, to: target.status, title: s.title, assignee: s.assignee };
 }
 
+// A task's comments, oldest first, with the author and ClickUp's own comment id.
+export async function taskComments(taskId: string) {
+  const c = await cu<{ comments: Any[] }>(`/task/${taskId}/comment`);
+  return (c.comments ?? [])
+    .map((x: Any) => ({
+      id: String(x.id),
+      user: (x.user?.username as string) ?? "Someone",
+      userId: Number(x.user?.id ?? 0),
+      text: String(x.comment_text ?? "").trim(),
+      at: Number(x.date),
+    }))
+    .filter((x) => x.text)
+    .sort((a, b) => a.at - b.at);
+}
+
+// Enough about a task to open a conversation for it
+export async function taskBrief(taskId: string) {
+  const t = await cu(`/task/${taskId}`);
+  return { id: String(t.id), title: t.name as string, project: String(t.list?.name ?? "No project").trim(), url: t.url as string, assignee: (t.assignees?.[0]?.username as string) ?? "Unassigned" };
+}
+
+// A comment on the task. notify=false: nobody gets a ClickUp notification for it.
+export async function postComment(taskId: string, text: string, notify = false) {
+  return cu<{ id: string }>(`/task/${taskId}/comment`, { method: "POST", body: JSON.stringify({ comment_text: text, notify_all: notify }) });
+}
+
 let meCache: { id: number; username: string } | null = null;
 export async function clickupMe() {
   meCache ??= (await cu<{ user: Any }>("/user")).user;
@@ -247,9 +332,9 @@ export async function clickupMe() {
 }
 
 // ClickUp's API can only log time for the token's owner on the Free plan; others stay in our own log.
-export async function pushTimeEntry(taskId: string, startMs: number, durationMs: number) {
+export async function pushTimeEntry(taskId: string, startMs: number, durationMs: number, note = "GAC Desk timer") {
   const team = await teamId();
-  await cu(`/team/${team}/time_entries`, { method: "POST", body: JSON.stringify({ tid: taskId, start: startMs, duration: durationMs, description: "GAC Desk timer" }) });
+  await cu(`/team/${team}/time_entries`, { method: "POST", body: JSON.stringify({ tid: taskId, start: startMs, duration: durationMs, description: note }) });
 }
 
 // Registers (or re-points) our webhook so status changes made in ClickUp reach the dashboard instantly.
@@ -288,9 +373,76 @@ export async function clickupWebhookInfo() {
   return { registered: saved ? { id: saved.id, endpoint: saved.endpoint, at: saved.at ?? null } : null, lastEvent: last ? Number(last) : null };
 }
 
+// ---------- Moving a whole project to another folder ----------
+// ClickUp's API can't move a list between folders, so we do what a person would do by hand: make the
+// list in the target folder, move every task into it, then remove the empty original. Statuses that
+// don't exist in the target folder are mapped and reported, never silently dropped.
+
+export async function planProjectMove(project: string, folder: string) {
+  const s = await structure();
+  const want = project.trim().toLowerCase();
+  const list = s.projects.find((p) => p.name.toLowerCase() === want) ?? s.projects.find((p) => p.name.toLowerCase().includes(want));
+  if (!list) throw new Error(`No project called "${project}"`);
+  const target = [...new Set(s.projects.map((p) => p.stage))].find((f) => f.toLowerCase() === folder.trim().toLowerCase()) ?? [...new Set(s.projects.map((p) => p.stage))].find((f) => f.toLowerCase().includes(folder.trim().toLowerCase()));
+  if (!target) throw new Error(`No folder called "${folder}"`);
+  if (list.stage === target) throw new Error(`"${list.name}" is already in ${target}`);
+  const tasks = await cu<{ tasks: Any[] }>(`/list/${list.id}/task?include_closed=true&subtasks=true`);
+  return { listId: list.id, name: list.name, from: list.stage, to: target, tasks: (tasks.tasks ?? []).length };
+}
+
+export async function moveProjectToFolder(project: string, folder: string) {
+  const plan = await planProjectMove(project, folder);
+  const s = await structure();
+  const folderId = s.folders.find((f) => f.name === plan.to)?.id;
+  if (!folderId) throw new Error(`Couldn't find the ${plan.to} folder`);
+  const team = await teamId();
+
+  const created = await cu<Any>(`/folder/${folderId}/list`, { method: "POST", body: JSON.stringify({ name: plan.name }) });
+  const newId = String(created.id);
+  // Statuses the new list doesn't have get mapped onto its first matching (or first open) status
+  const from = await cu<Any>(`/list/${plan.listId}`);
+  const to = await cu<Any>(`/list/${newId}`);
+  const toStatuses = (to.statuses ?? []) as Any[];
+  const fallback = toStatuses.find((x: Any) => x.type === "open") ?? toStatuses[0];
+  const mappings = ((from.statuses ?? []) as Any[])
+    .filter((f: Any) => !toStatuses.some((t: Any) => String(t.status).toLowerCase() === String(f.status).toLowerCase()))
+    .map((f: Any) => ({ source_status_id: f.id, destination_status_id: fallback?.id, from: String(f.status), to: String(fallback?.status ?? "") }))
+    .filter((m) => m.destination_status_id);
+
+  const { tasks } = await cu<{ tasks: Any[] }>(`/list/${plan.listId}/task?include_closed=true&subtasks=true`);
+  let moved = 0;
+  const failed: string[] = [];
+  for (const t of tasks ?? []) {
+    try {
+      await cu(`/workspaces/${team}/tasks/${t.id}/home_list/${newId}`, {
+        method: "PUT",
+        body: JSON.stringify({ move_custom_fields: true, status_mappings: mappings.map(({ source_status_id, destination_status_id }) => ({ source_status_id, destination_status_id })) }),
+      }, true, "v3");
+      moved++;
+    } catch (e) {
+      failed.push(`${t.name}: ${e instanceof Error ? e.message : "failed"}`);
+    }
+  }
+  // Only remove the original once everything has left it
+  let removed = false;
+  if (moved === (tasks ?? []).length && !failed.length) {
+    await cu(`/list/${plan.listId}`, { method: "DELETE" }).then(() => (removed = true)).catch(() => {});
+  }
+  structureCache = null;
+  invalidateBoard();
+  return { ...plan, moved, failed, removed, remapped: mappings.map((m) => `${m.from} → ${m.to}`) };
+}
+
 // Where a project sits right now (e.g. "Pending From Client"), for warnings and the assistant.
 export async function projectStage(name: string) {
   if (!token()) return null;
   const p = (await structure()).projects.find((x) => x.name.toLowerCase() === name.trim().toLowerCase());
   return p ? { stage: p.stage, current: p.current, owner: p.owner } : null;
+}
+
+// Every folder in the workspace with its "counts as a current project" flag, for Settings.
+export async function projectFolders(force = false) {
+  if (!token()) return [];
+  if (force) structureCache = null;
+  return (await structure()).folders;
 }

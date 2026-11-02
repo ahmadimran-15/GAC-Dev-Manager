@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { CheckCircle2, Clock, LogOut, Pause, Play, XCircle } from "lucide-react";
 import { clock, hm, useTick } from "@/components/TaskControls";
 import { Pill, STATUS_TONE } from "@/components/ui";
+import TeamInbox from "@/components/TeamInbox";
 
 interface PTask {
   id: string;
@@ -22,7 +23,7 @@ interface Info {
   clients: { id: string; label: string; project: string | null }[];
   mine: { id: string; text: string; project: string | null; status: string; created_at: number; conv_name: string | null }[];
   tasks: PTask[];
-  running: { id: string; task_id: string; task_title: string; started_at: number } | null;
+  running: { id: string; task_id: string; task_title: string; started_at: number; before_ms?: number } | null;
   timersOn: boolean;
 }
 
@@ -39,6 +40,7 @@ export default function Portal() {
   const [pw, setPw] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [timerBusy, setTimerBusy] = useState(false);
+  const [tab, setTab] = useState<"chats" | "work">("chats");
   const now = useTick(info?.now);
 
   const load = () =>
@@ -86,9 +88,10 @@ export default function Portal() {
   }
 
   const clients = (info?.clients ?? []).filter((c) => !project || !c.project || c.project === project);
+  const tabBtn = (on: boolean) => `rounded-lg px-3 py-1.5 text-[13.5px] transition ${on ? "bg-white font-medium shadow-[0_0_0_1px_var(--line)]" : "text-[var(--ink-2)] hover:text-[var(--ink)]"}`;
 
   return (
-    <div className="mx-auto max-w-[640px] px-6 py-10">
+    <div className={`mx-auto px-4 py-6 md:px-6 md:py-10 ${tab === "chats" ? "max-w-[1200px]" : "max-w-[640px]"}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#171717] text-[13px] font-bold text-white">G</span>
@@ -120,6 +123,23 @@ export default function Portal() {
         </div>
       )}
 
+      <div className="mt-6 flex gap-1">
+        <button className={tabBtn(tab === "chats")} onClick={() => setTab("chats")}>
+          WhatsApp
+        </button>
+        <button className={tabBtn(tab === "work")} onClick={() => setTab("work")}>
+          Tasks & updates
+        </button>
+      </div>
+
+      {tab === "chats" && (
+        <div className="mt-4">
+          <TeamInbox />
+        </div>
+      )}
+
+      {tab === "work" && (
+        <>
       {info?.me.clickupName && (
         <>
           <h1 className="mt-10 text-[26px] font-semibold tracking-tight">My tasks</h1>
@@ -128,7 +148,7 @@ export default function Portal() {
             <div className="card mt-5 flex items-center gap-3 !border-[var(--green)] px-4 py-3">
               <span className="dot" style={{ background: "var(--green)" }} />
               <div className="min-w-0 flex-1 truncate text-[14px] font-medium">{info.running.task_title}</div>
-              <span className="tnum text-[15px] font-semibold">{clock(info.running.started_at, now)}</span>
+              <span className="tnum text-[15px] font-semibold">{clock(info.running.started_at - (info.running.before_ms ?? 0), now)}</span>
               <button className="btn btn-sm" disabled={timerBusy} onClick={() => timer({ action: "stop" })}>
                 <Pause size={12} /> Pause
               </button>
@@ -155,7 +175,7 @@ export default function Portal() {
                   </div>
                   {(info.timersOn || on) && (
                     <button className={`btn btn-sm ${on ? "!border-[var(--green)] !text-[var(--green)]" : ""}`} disabled={timerBusy} onClick={() => timer(on ? { action: "stop" } : { action: "start", taskId: t.id })}>
-                      {on ? <Pause size={12} /> : <Play size={12} />} {on ? "Pause" : "Start"}
+                      {on ? <Pause size={12} /> : <Play size={12} />} {on ? "Pause" : t.trackedMin ? `Resume · ${hm(t.trackedMin)}` : "Start"}
                     </button>
                   )}
                 </div>
@@ -207,6 +227,8 @@ export default function Portal() {
         ))}
         {info && !info.mine.length && <p className="px-4 py-6 text-center text-[13px] text-[var(--muted)]">Nothing yet.</p>}
       </div>
+        </>
+      )}
     </div>
   );
 }

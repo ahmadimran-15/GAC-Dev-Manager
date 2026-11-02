@@ -1,15 +1,17 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Loader2, Mic, Search, Square, TriangleAlert } from "lucide-react";
+import Link from "next/link";
+import { ArrowUp, Loader2, Maximize2, Mic, Search, Square, TriangleAlert } from "lucide-react";
 import { api, useLive } from "@/components/Live";
 import { Channel } from "@/components/ui";
 import { VOICE_LANGS, useVoice } from "@/lib/use-voice";
 
 interface Result {
-  intent: "reply" | "task" | "answer";
+  intent: "reply" | "task" | "project" | "answer";
   conversation?: { id: string; name: string; channel: string } | null;
   reply_text?: string;
   task?: { title: string; description: string; project?: string; assignee?: string; priority?: string };
+  move?: { listId: string; name: string; from: string; to: string; tasks: number };
   answer?: string;
   warning?: string | null;
   searched?: { source: string; query: string };
@@ -48,7 +50,8 @@ function Linked({ text }: { text: string }) {
   );
 }
 
-export default function Assistant() {
+// full = the /assistant page (its own tab, whole screen). Otherwise it's the "/" pop-up.
+export default function Assistant({ full = false }: { full?: boolean }) {
   const { assistantOpen, setAssistantOpen, send, toast, state } = useLive();
   const [text, setText] = useState("");
   const [lang, setLang] = useState("en-US");
@@ -60,6 +63,7 @@ export default function Assistant() {
   const voice = useVoice((t) => setText((p) => (p ? `${p} ${t}` : t)), !!state?.connections.voiceWhisper);
 
   useEffect(() => {
+    if (full) return; // the page is already open: no "/" shortcut, and Esc shouldn't close it
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       if (e.key === "/" && !el.closest("input, textarea, select")) {
@@ -70,9 +74,14 @@ export default function Assistant() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setAssistantOpen]);
+  }, [setAssistantOpen, full]);
 
   useEffect(() => {
+    if (full) {
+      setTimeout(() => inputRef.current?.focus(), 30);
+      if (!board) api<{ team: string[]; projects: string[] }>("/api/team").then(setBoard).catch(() => {});
+      return;
+    }
     if (assistantOpen) {
       setTimeout(() => inputRef.current?.focus(), 30);
       if (!board) api<{ team: string[]; projects: string[] }>("/api/team").then(setBoard).catch(() => {});
@@ -83,7 +92,7 @@ export default function Assistant() {
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [turns]);
 
-  if (!assistantOpen) return null;
+  if (!assistantOpen && !full) return null;
 
   const update = (i: number, r: Partial<Result>) => setTurns((ts) => ts.map((t, j) => (j === i ? { ...t, r: { ...t.r!, ...r } } : t)));
 
@@ -116,10 +125,31 @@ export default function Assistant() {
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/20 px-4 pt-[8vh] backdrop-blur-[2px]" onClick={() => setAssistantOpen(false)}>
-      <div className="pop-in flex max-h-[calc(84vh/var(--ui-zoom))] w-full max-w-[680px] flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-white shadow-[0_30px_80px_-20px_rgba(0,0,0,0.35)]" onClick={(e) => e.stopPropagation()}>
-        {/* Conversation */}
+  const panel = (
+    <div
+      className={
+        full
+          ? "card flex min-h-0 flex-1 flex-col overflow-hidden"
+          : "pop-in flex max-h-[calc(84vh/var(--ui-zoom))] w-full max-w-[680px] flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-white shadow-[0_30px_80px_-20px_rgba(0,0,0,0.35)]"
+      }
+      onClick={(e) => e.stopPropagation()}
+    >
+      {!full && (
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--line)] px-4 py-2">
+          <span className="eyebrow">Assistant</span>
+          <div className="flex items-center gap-1">
+            {turns.length > 0 && (
+              <button className="btn btn-sm btn-ghost !h-7" onClick={() => setTurns([])} title="Clear this chat">
+                Clear
+              </button>
+            )}
+            <Link href="/assistant" className="btn btn-sm !h-7" title="Open the assistant in its own tab, full screen" onClick={() => setAssistantOpen(false)}>
+              <Maximize2 size={12} /> Full screen
+            </Link>
+          </div>
+        </div>
+      )}
+      {/* Conversation */}
         <div className="scroll min-h-0 flex-1 bg-[var(--bg)] px-5 py-4">
           {!turns.length && (
             <div className="space-y-1">
@@ -199,6 +229,44 @@ export default function Assistant() {
                     </div>
                   )}
 
+                  {!t.r.done && t.r.intent === "project" && t.r.move && (
+                    <div className="space-y-2">
+                      <div className="text-[13px] text-[var(--ink-2)]">Move a project in ClickUp</div>
+                      <p className="text-[14px] leading-relaxed">
+                        Move <b>{t.r.move.name}</b> with its {t.r.move.tasks} task{t.r.move.tasks === 1 ? "" : "s"} from <b>{t.r.move.from}</b> into <b>{t.r.move.to}</b>?
+                      </p>
+                      <p className="rounded-lg bg-[var(--bg)] px-3 py-2 text-[12.5px] text-[var(--ink-2)]">
+                        ClickUp has no “move a list” in its API, so the list is created in {t.r.move.to}, every task is moved across, and the empty original is deleted. Comments, attachments and tracked
+                        time travel with each task. A status the new list doesn&apos;t have is mapped to its first one and I&apos;ll tell you which.
+                      </p>
+                      <div className="flex justify-end">
+                        <button
+                          className="btn btn-dark btn-sm"
+                          disabled={busy}
+                          onClick={async () => {
+                            setBusy(true);
+                            try {
+                              const r = await api<{ moved: number; failed: string[]; removed: boolean; remapped: string[] }>("/api/clickup/move", { project: t.r!.move!.name, folder: t.r!.move!.to });
+                              update(i, {
+                                done:
+                                  `Moved ${r.moved} task${r.moved === 1 ? "" : "s"} into ${t.r!.move!.to}.` +
+                                  (r.removed ? " The old empty list is gone." : " The original list is still there — some tasks stayed behind.") +
+                                  (r.remapped.length ? ` Statuses remapped: ${r.remapped.join(", ")}.` : "") +
+                                  (r.failed.length ? ` Couldn't move: ${r.failed.slice(0, 3).join("; ")}` : ""),
+                              });
+                            } catch (e) {
+                              toast(e instanceof Error ? e.message : "ClickUp failed", "error");
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                        >
+                          Move it
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {!t.r.done && (t.r.intent === "answer" || (t.r.intent === "reply" && !t.r.conversation)) && (
                     <p dir="auto" className="whitespace-pre-wrap text-[14px] leading-relaxed">
                       <Linked text={t.r.answer || "I couldn't tell which client you meant. Try saying their name."} />
@@ -223,9 +291,9 @@ export default function Assistant() {
             </button>
             <textarea
               ref={inputRef}
-              rows={1}
+              rows={full ? 3 : 2}
               dir="auto"
-              className="max-h-32 min-h-[40px] flex-1 resize-none bg-transparent py-2 text-[16px] leading-snug outline-none placeholder:text-[var(--muted)]"
+              className={`flex-1 resize-y bg-transparent py-2 text-[16px] leading-relaxed outline-none placeholder:text-[var(--muted)] ${full ? "max-h-72 min-h-[96px]" : "max-h-56 min-h-[72px]"}`}
               placeholder={voice.listening ? "Listening…" : voice.interim || "Ask, find, reply or create a task"}
               value={voice.interim && voice.listening ? `${text} ${voice.interim}`.trim() : text}
               onChange={(e) => setText(e.target.value)}
@@ -246,10 +314,18 @@ export default function Assistant() {
                 {l.label}
               </button>
             ))}
-            <span className="ml-auto text-[11.5px] text-[var(--muted)]">{state?.connections.voiceWhisper ? "Whisper" : "Browser"} voice · Enter to send · Esc to close</span>
+            <span className="ml-auto text-[11.5px] text-[var(--muted)]">
+              {state?.connections.voiceWhisper ? "Whisper" : "Browser"} voice · Enter to send{full ? "" : " · Esc to close"}
+            </span>
           </div>
         </div>
-      </div>
+    </div>
+  );
+
+  if (full) return panel;
+  return (
+    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/20 px-4 pt-[8vh] backdrop-blur-[2px]" onClick={() => setAssistantOpen(false)}>
+      {panel}
     </div>
   );
 }

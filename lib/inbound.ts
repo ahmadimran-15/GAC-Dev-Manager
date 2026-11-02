@@ -255,6 +255,12 @@ async function sendOnceTo(convId: string, text: string, opts: { ack?: boolean; b
       r = await sendWhatsApp(c.external_id, m.text, sender.id, { quotedMessageId: lastIn?.external_id, mentions: m.mentions });
       text = m.display; // stored and shown as "@Tulaib", not "@923…"
     }
+  } else if (c.channel === "clickup") {
+    // A reply in a task's thread is posted as a ClickUp comment, with a notification for the team
+    const { postComment } = await import("@/lib/clickup");
+    const p = await postComment(c.external_id, text, true);
+    r = { ok: true, id: p?.id ? `cu_${p.id}` : undefined };
+    via = "ClickUp";
   } else r = { ok: true, simulated: true }; // Slack / Teams / Outlook connect later
   if (!r.ok) throw new Error(r.error ?? "Send failed");
   await addMessage({ conv_id: convId, direction: "out", text, ack: opts.ack ? 1 : 0, sent_by: opts.by ?? "me", status: r.simulated ? "simulated" : "sent", external_id: r.id ?? null, via });
@@ -327,7 +333,8 @@ async function sendReminders() {
   const now = Date.now();
   const due: ConvSummary[] = [];
   for (const c of await listConversations()) {
-    if (!c.waiting || c.demo || !c.waitingSince || now - c.waitingSince < (c.remindAfter ?? defaultAfter) * 60_000) continue;
+    // Task comments live in the inbox too, but they're our own team: no client reminders for them
+    if (!c.waiting || c.demo || c.channel === "clickup" || !c.waitingSince || now - c.waitingSince < (c.remindAfter ?? defaultAfter) * 60_000) continue;
     const conv = await getConversation(c.id);
     if (!conv?.reminded_at || now - Number(conv.reminded_at) > every) due.push(c);
   }
@@ -407,6 +414,35 @@ export function startWorker() {
   };
   setTimeout(() => statusTimers().catch((e) => log("status-timer-error", String(e))), 25_000);
   setInterval(() => statusTimers().catch((e) => log("status-timer-error", String(e))), 120_000);
+  // Shift hours: clocks stop at the end of the shift and resume at the next start (checked every minute)
+  const shift = async () => {
+    const r = await (await import("@/lib/timers")).shiftTick();
+    if (r) log("shift", r);
+  };
+  setInterval(() => shift().catch((e) => log("shift-error", String(e))), 60_000);
+  // ClickUp comments in the inbox: the webhook brings new ones in straight away. This picks up anything
+  // it missed and, a few tasks at a time, reads the comments on tasks the inbox hasn't seen yet.
+  const taskChats = async () => {
+    const { syncRecentTaskChats, syncTaskComments } = await import("@/lib/taskchat");
+    const got = await syncRecentTaskChats(6);
+    const { board } = await import("@/lib/clickup");
+    const b = await board();
+    if (b.source === "clickup" && !b.error) {
+      const { kvGet, kvSet } = await import("@/lib/db");
+      const done = new Set(JSON.parse((await kvGet("task_chat_scanned")) ?? "[]") as string[]);
+      // A few at a time, and the board already tells us the title and project (one call per task, not two)
+      const next = b.tasks.filter((t) => !done.has(t.id)).slice(0, 6);
+      for (const t of next) {
+        await syncTaskComments(t.id, { title: t.title, project: t.project, url: t.url ?? "" }).catch(() => {});
+        done.add(t.id);
+      }
+      if (next.length) await kvSet("task_chat_scanned", JSON.stringify([...done].slice(-2000)));
+    }
+    if (got) log("task-comments", { incoming: got });
+  };
+  setTimeout(() => taskChats().catch((e) => log("task-chat-error", String(e))), 45_000);
+  setInterval(() => taskChats().catch((e) => log("task-chat-error", String(e))), 3 * 60_000);
+
   const estimates = async () => {
     const r = await (await import("@/lib/estimates")).estimateMissing();
     if (r.estimated) log("estimates", r);

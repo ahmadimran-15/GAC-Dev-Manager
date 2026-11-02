@@ -235,6 +235,14 @@ function driver(): Promise<Driver> {
       const d = usingPostgres() ? await connectPostgres() : connectSqlite();
       if (d.kind === "postgres") for (const m of PG_MIGRATIONS) await d.exec(m).catch(() => {}); // before the schema: older tables need the columns first
       await d.exec(schema(d.kind === "postgres"));
+      // One running clock per task. Duplicates (two starts racing) are removed, keeping the earliest, then
+      // the database itself refuses a second running clock for the same task.
+      await d
+        .exec(
+          "delete from timers where ended_at is null and exists (select 1 from timers o where o.task_id = timers.task_id and o.ended_at is null and (o.started_at < timers.started_at or (o.started_at = timers.started_at and o.id < timers.id)))",
+        )
+        .catch(() => {});
+      await d.exec("create unique index if not exists timers_one_running on timers (task_id) where ended_at is null").catch(() => {});
       if (d.kind === "sqlite") {
         for (const [table, column, type] of SQLITE_MIGRATIONS) {
           const cols = await d.all(`pragma table_info(${table})`, []);

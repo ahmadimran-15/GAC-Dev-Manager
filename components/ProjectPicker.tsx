@@ -26,11 +26,14 @@ export default function ProjectPicker({ value, onChange, fallback }: { value: st
   const [error, setError] = useState("");
   const ref = useRef<HTMLDivElement>(null);
 
+  const loadedAt = useRef(0);
+
   async function load(refresh = false) {
     setLoading(true);
     setError("");
     try {
       setList((await api<{ projects: ProjectName[] }>(`/api/clickup/projects${refresh ? "?refresh=1" : ""}`)).projects);
+      loadedAt.current = Date.now();
     } catch (e) {
       setError(e instanceof Error ? e.message : "ClickUp failed");
     } finally {
@@ -47,6 +50,8 @@ export default function ProjectPicker({ value, onChange, fallback }: { value: st
       setQ("");
       return;
     }
+    // Opening it after a couple of minutes re-reads ClickUp, so a project added there is already here
+    if (Date.now() - loadedAt.current > 120_000) load(true);
     const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     document.addEventListener("mousedown", close);
@@ -84,8 +89,8 @@ export default function ProjectPicker({ value, onChange, fallback }: { value: st
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && q.trim() && pick(shown.find((p) => p.name.toLowerCase() === q.trim().toLowerCase())?.name ?? shown[0]?.name ?? q.trim())}
             />
-            <button type="button" className="btn btn-ghost !h-7 !w-7 shrink-0 !p-0" title="Get the latest project names from ClickUp" disabled={loading} onClick={() => load(true)}>
-              <RotateCw size={13} className={loading ? "animate-spin" : ""} />
+            <button type="button" className="btn !h-7 shrink-0 !px-2 text-[12px]" title="Read the project list from ClickUp again" disabled={loading} onClick={() => load(true)}>
+              <RotateCw size={12} className={loading ? "animate-spin" : ""} /> {loading ? "Reading…" : "Refresh"}
             </button>
           </div>
           <div className="scroll max-h-[300px] p-1">

@@ -4,7 +4,9 @@ import { SESSION_COOKIE, SESSION_MAX_AGE, cookieOptions, createSession, isHttps,
 // Login required everywhere except the login page and incoming webhooks.
 // Team members only reach their portal; everything else is the owner's.
 const PUBLIC = [/^\/login/, /^\/api\/auth\//, /^\/api\/webhooks\//];
-const TEAM_ALLOWED = [/^\/portal/, /^\/api\/portal/];
+// /form is the update form: a login the owner created in Settings → Logins, so every update carries
+// a real name. It only ever shows project and task names, never a client, a number or a chat.
+const TEAM_ALLOWED = [/^\/portal/, /^\/api\/portal/, /^\/form$/, /^\/api\/form$/];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

@@ -34,7 +34,7 @@ export interface LiveState {
   health: { at: number; problems: string[] } | null;
   conversations: ConvSummary[];
   drafts: DraftRow[];
-  stats: { waiting: number; firstReplyAvg: number | null; repliesToday: number };
+  stats: { waiting: number; tasks?: number; firstReplyAvg: number | null; repliesToday: number };
   accounts: AccountLite[];
   connections: {
     gemini: boolean;

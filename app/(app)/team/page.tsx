@@ -1,28 +1,39 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Loader2, PlayCircle, RotateCw, Sparkles, X } from "lucide-react";
+import { ExternalLink, Loader2, MessageSquare, Play, PlayCircle, RotateCw, Sparkles, Square, X } from "lucide-react";
+import Link from "next/link";
 import type { Board } from "@/lib/clickup";
 import { api, useLive } from "@/components/Live";
 import Dropdown from "@/components/Dropdown";
-import { Avatar, Pill, ago } from "@/components/ui";
+import { Avatar, Pill, TEAM_ORDER, ago, teamKey } from "@/components/ui";
 import { TeamSkeleton } from "@/components/Skeleton";
 import { EstimateBox, StatusSelect, TimerButton, clock, hm, useTick, type Estimate, type RunningTimer } from "@/components/TaskControls";
 
-const FILTERS = ["Open", "In progress", "Blocked", "Done", "All"] as const;
+const FILTERS = ["Open", "In progress", "Other", "Blocked", "Done", "All"] as const;
+// Open = not started yet (to do / pending); Other = every remaining status (client pending, UAT testing, waiting for approval…)
+const isOpen = (s: string) => /^(to ?do|pending|open)$/.test(s.trim());
+const inWork = (s: string) => /progress|revision/.test(s);
+const bucket = (s: string) => (isDone(s) ? "Done" : /block/.test(s) ? "Blocked" : inWork(s) ? "In progress" : isOpen(s) ? "Open" : "Other");
 
 type T = Board["tasks"][number];
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+const PRIORITY_OPTIONS = [{ value: "", label: "Any" }, { value: "urgent", label: "Urgent" }, { value: "high", label: "High" }, { value: "normal", label: "Normal" }, { value: "low", label: "Low" }];
 const PRIORITY_TONE = { urgent: "red", high: "amber", normal: "gray", low: "gray" } as const;
 const STATUS_RANK = (s: string) => (/block/.test(s) ? 0 : /progress|revision/.test(s) ? 1 : /complete|done|closed/.test(s) ? 4 : /to do|open/.test(s) ? 2 : 3);
+// The team in your order (Ali first), anyone else after them by name
+const teamRank = (name: string) => { const i = TEAM_ORDER.indexOf(teamKey(name)); return i < 0 ? TEAM_ORDER.length : i; };
+const byPerson = (a: string, b: string) => teamRank(a) - teamRank(b) || a.localeCompare(b);
 const byDue = (a: T, b: T) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity);
 const SORTS = {
   priority: { label: "Priority", fn: (a: T, b: T) => (PRIORITY_RANK[a.priority ?? "normal"] ?? 2) - (PRIORITY_RANK[b.priority ?? "normal"] ?? 2) || byDue(a, b) },
   due: { label: "Due date", fn: byDue },
-  person: { label: "Person", fn: (a: T, b: T) => a.assignee.localeCompare(b.assignee) || (PRIORITY_RANK[a.priority ?? "normal"] ?? 2) - (PRIORITY_RANK[b.priority ?? "normal"] ?? 2) },
+  person: { label: "Person", fn: (a: T, b: T) => byPerson(a.assignee, b.assignee) || (PRIORITY_RANK[a.priority ?? "normal"] ?? 2) - (PRIORITY_RANK[b.priority ?? "normal"] ?? 2) },
   status: { label: "Status", fn: (a: T, b: T) => STATUS_RANK(a.status) - STATUS_RANK(b.status) || a.status.localeCompare(b.status) },
   project: { label: "Project", fn: (a: T, b: T) => a.project.localeCompare(b.project) },
 };
 const isDone = (s: string) => /complete|done|closed/.test(s);
+// 45m · 3h 20m · 2d 4h
+const dur = (m: number) => (m < 60 ? `${Math.max(0, Math.round(m))}m` : m < 1440 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`);
 const when = (t: number) => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 interface Change {
@@ -54,6 +65,8 @@ type TeamData = Board & {
   changes: Change[];
   performance: Perf[];
   timersOn: boolean;
+  shift?: { label: string; on: boolean };
+  inStatus?: Record<string, { status: string; since: number; spent: Record<string, number> }>;
 };
 
 interface Detail {
@@ -142,7 +155,7 @@ function TaskPanel({ id, data, now, onClose, reload }: { id: string; data: TeamD
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <StatusSelect taskId={d.id} status={d.status} onChanged={refresh} />
-                {(data.timersOn || running) && <TimerButton taskId={d.id} assignee={d.assignee} running={running} now={now} onChanged={refresh} />}
+                {(data.timersOn || running) && <TimerButton taskId={d.id} assignee={d.assignee} running={running} now={now} onChanged={refresh} savedMin={data.tracked[d.id] ?? 0} />}
                 {d.url && (
                   <a href={d.url} target="_blank" className="btn btn-sm btn-ghost">
                     Open in ClickUp <ExternalLink size={12} />
@@ -153,6 +166,29 @@ function TaskPanel({ id, data, now, onClose, reload }: { id: string; data: TeamD
                 <div className="eyebrow mb-2">Time · only you see this</div>
                 <EstimateBox taskId={d.id} initial={data.estimates[d.id]} tracked={data.tracked[d.id] ?? 0} onSaved={reload} />
               </div>
+              {(() => {
+                // Time in each status (from our status log), the status now still counting
+                const s = data.inStatus?.[d.id];
+                if (!s) return null;
+                const rows = Object.entries({ ...s.spent, [s.status]: (s.spent[s.status] ?? 0) + (s.status === d.status ? (now - s.since) / 60000 : 0) }).sort((a, b) => b[1] - a[1]);
+                return (
+                  <div>
+                    <div className="eyebrow mb-2">Time in each status</div>
+                    <div className="space-y-1 text-[13px]">
+                      {rows.map(([st, m]) => (
+                        <div key={st} className="flex justify-between gap-3">
+                          <span className={st === d.status ? "font-medium" : "text-[var(--ink-2)]"}>
+                            {st}
+                            {st === d.status && <span className="font-normal text-[var(--muted)]"> · now</span>}
+                          </span>
+                          <span className="tnum">{dur(m)}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-1.5 text-[12px] text-[var(--muted)]">Counted since {when(Math.min(s.since, ...history.map((h) => h.at)))}, when GAC Desk started logging this task's changes.</p>
+                  </div>
+                );
+              })()}
               {d.looms.length > 0 && (
                 <div>
                   <div className="eyebrow mb-2">Loom videos</div>
@@ -177,7 +213,13 @@ function TaskPanel({ id, data, now, onClose, reload }: { id: string; data: TeamD
                   <div className="space-y-1 text-[12.5px] text-[var(--ink-2)]">
                     {[
                       ...entries.map((e) => ({ at: e.started_at, text: `${e.person} worked ${e.ended_at ? clock(e.started_at, e.ended_at) : "· running"}` })),
-                      ...history.map((h) => ({ at: h.at, text: `${h.person ?? "Someone"}: ${h.from_status ?? "?"} → ${h.to_status} (${h.source})` })),
+                      ...history.map((h, i) => {
+                        // How long it sat in the old status, and the time worked on it by then
+                        const prev = history[i + 1];
+                        const sat = prev && prev.to_status === h.from_status ? ` after ${dur((h.at - prev.at) / 60000)} in ${h.from_status}` : "";
+                        const worked = entries.reduce((sum, e) => sum + Math.max(0, Math.min(e.ended_at ?? now, h.at) - e.started_at), 0) / 60000;
+                        return { at: h.at, text: `${h.person ?? "Someone"}: ${h.from_status ?? "?"} → ${h.to_status}${sat}${worked >= 1 ? ` · ${hm(Math.round(worked))} worked by then` : ""}` };
+                      }),
                     ]
                       .sort((a, b) => b.at - a.at)
                       .slice(0, 20)
@@ -191,7 +233,12 @@ function TaskPanel({ id, data, now, onClose, reload }: { id: string; data: TeamD
                 </div>
               )}
               <div>
-                <div className="eyebrow mb-2">Updates from the team · {d.comments.length}</div>
+                <div className="eyebrow mb-2 flex items-center justify-between gap-2">
+                  <span>Updates from the team · {d.comments.length}</span>
+                  <a href={`/api/tasks/${d.id}/chat`} className="btn btn-sm !h-7 normal-case" title="Open this task's comments in the inbox and reply from there">
+                    Reply <MessageSquare size={12} />
+                  </a>
+                </div>
                 <div className="space-y-4">
                   {d.comments.map((c, i) => (
                     <div key={i} className="flex gap-3">
@@ -346,37 +393,74 @@ export default function Team() {
   const [loading, setLoading] = useState(false);
   const [openTask, setOpenTask] = useState<string | null>(null);
   const [sort, setSort] = useState("priority");
+  const [prio, setPrio] = useState(""); // priority filter: "" = any
+  const [wPerson, setWPerson] = useState(""); // Working now filters
+  const [wPrio, setWPrio] = useState("");
   const now = useTick(data?.now);
 
-  const load = useCallback(async (refresh = false) => {
-    setLoading(true);
+  // quiet = background refresh: no spinner, errors ignored
+  const load = useCallback(async (refresh = false, quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       setData(await api<TeamData>(`/api/team${refresh ? "?refresh=1" : ""}`));
+    } catch (e) {
+      if (!quiet) throw e;
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, []);
   // Status changes already clear the server's ClickUp cache, so a plain reload is enough
   const reload = useCallback(() => load(), [load]);
 
+  // Auto-refresh (remembered in this browser): every 15 s, a fresh ClickUp read every 2 min, right away when
+  // you come back to the tab; paused while the tab is hidden
+  const [auto, setAuto] = useState(true);
+  useEffect(() => {
+    try {
+      setAuto(localStorage.getItem("gac_team_auto") !== "0");
+    } catch {}
+  }, []);
   useEffect(() => {
     load();
-    const id = setInterval(() => load(), 30_000);
-    return () => clearInterval(id);
   }, [load]);
+  useEffect(() => {
+    if (!auto) return;
+    let ticks = 0;
+    const tick = () => !document.hidden && load(++ticks % 8 === 0, true);
+    const id = setInterval(tick, 15_000);
+    const back = () => !document.hidden && load(false, true);
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("focus", back);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("focus", back);
+    };
+  }, [auto, load]);
+  const toggleAuto = () => {
+    setAuto((a) => {
+      try {
+        localStorage.setItem("gac_team_auto", a ? "0" : "1");
+      } catch {}
+      return !a;
+    });
+  };
 
   const all = data?.tasks ?? [];
   const live = data?.source === "clickup";
   const tasks = all
-    .filter((t) => (!person || t.assignee === person) && (!project || t.project === project))
-    .filter((t) => (f === "All" ? true : f === "Done" ? isDone(t.status) : f === "Open" ? !isDone(t.status) : f === "Blocked" ? /block/.test(t.status) : /progress|revision/.test(t.status)))
+    .filter((t) => (!person || t.assignee === person) && (!project || t.project === project) && (!prio || (t.priority ?? "normal") === prio))
+    .filter((t) => f === "All" || bucket(t.status) === f)
     .sort(SORTS[sort as keyof typeof SORTS]?.fn ?? SORTS.priority.fn);
   const current = (data?.projectInfo ?? []).filter((p) => p.current);
   const otherStages = [...new Set((data?.projectInfo ?? []).filter((p) => !p.current).map((p) => p.stage))];
   const runningFor = (taskId: string) => data?.running.find((r) => r.task_id === taskId);
   // The time a task should take: your estimate, else Gemini's, else ClickUp's
   const targetOf = (t: { id: string; estimateMin: number | null }) => data?.estimates[t.id]?.my_min ?? data?.estimates[t.id]?.ai_min ?? t.estimateMin ?? null;
-  const trackedOf = (t: { id: string; spentMin: number }) => (data?.tracked[t.id] ?? 0) || t.spentMin;
+  // Minutes since the last refresh, so running clocks keep counting between refreshes
+  const since = data ? Math.max(0, (now - data.now) / 60000) : 0;
+  const liveFor = (person: string, base: number) => base + since * (data?.running.filter((r) => r.person === person).length ?? 0);
+  const trackedOf = (t: { id: string; spentMin: number }) => Math.round(((data?.tracked[t.id] ?? 0) || t.spentMin) + (runningFor(t.id) ? since : 0));
   const [estimating, setEstimating] = useState(false);
   const [side, setSide] = useState<"projects" | "performance">("projects");
   const { toast } = useLive();
@@ -393,25 +477,43 @@ export default function Team() {
           </p>
         </div>
         <div className="flex gap-2">
-          {data && (
-            <button
-              className={`btn btn-sm ${data.timersOn ? "" : "!text-[var(--muted)]"}`}
-              title={data.timersOn ? "Timers run while a task is in progress or in revision. Click to switch them off (stops every running timer)." : "Timers are off: nothing is being timed. Click to switch them on."}
-              onClick={async () => {
-                const on = !data.timersOn;
-                if (!on && !confirm("Switch timers off? Every running timer stops.")) return;
-                try {
-                  await api("/api/timers", { action: "enabled", on });
-                  toast(on ? "Timers on: tasks in progress / revision are timed from now" : "Timers off");
-                  await load();
-                } catch (e) {
-                  toast(e instanceof Error ? e.message : "Failed", "error");
-                }
-              }}
-            >
-              <span className="dot" style={{ background: data.timersOn ? "var(--green)" : "#cfcfca" }} /> Timers {data.timersOn ? "on" : "off"}
-            </button>
+          {data && !data.timersOn && (
+            <Link href="/settings#time" className="btn btn-sm !text-[var(--muted)]" title="Switch time tracking on in Settings">
+              <span className="dot" style={{ background: "#cfcfca" }} /> Time tracking off
+            </Link>
           )}
+          {data?.timersOn && (() => {
+            // Tasks in progress / revision without a clock, and the clocks running now
+            const idle = all.filter((t) => /progress|revision/.test(t.status) && t.assignee !== "Unassigned" && !runningFor(t.id)).length;
+            const bulk = async (action: "start-all" | "stop-all") => {
+              if (action === "stop-all" && !confirm(`Stop all ${data.running.length} running timers?`)) return;
+              try {
+                const r = await api<{ started?: number; stopped?: number }>("/api/timers", { action });
+                toast(action === "start-all" ? `Started ${r.started} timer${r.started === 1 ? "" : "s"}` : `Stopped ${r.stopped} timer${r.stopped === 1 ? "" : "s"}`);
+                await load();
+              } catch (e) {
+                toast(e instanceof Error ? e.message : "Failed", "error");
+              }
+            };
+            return (
+              <>
+                <span className="hidden items-center gap-1.5 text-[12.5px] text-[var(--muted)] lg:inline-flex" title="Clocks follow ClickUp: in progress / revision runs, any other status stops. Only during the shift (Pakistan time).">
+                  <span className="dot" style={{ background: data.shift?.on ? "var(--green)" : "var(--amber)" }} />
+                  {data.shift?.on ? `Shift ${data.shift.label}` : `Paused until ${data.shift?.label.split(" – ")[0] ?? "shift start"}`}
+                </span>
+                {idle > 0 && (
+                  <button className="btn btn-sm" disabled={!data.shift?.on} title={data.shift?.on ? "Start a timer for every task in progress or revision" : "Outside shift hours"} onClick={() => bulk("start-all")}>
+                    <Play size={12} /> Start all in progress ({idle})
+                  </button>
+                )}
+                {data.running.length > 0 && (
+                  <button className="btn btn-sm !border-[var(--red)] !text-[var(--red)]" onClick={() => bulk("stop-all")}>
+                    <Square size={11} fill="currentColor" /> Stop all ({data.running.length})
+                  </button>
+                )}
+              </>
+            );
+          })()}
           <button
             className="btn btn-sm"
             disabled={estimating || !live}
@@ -431,8 +533,12 @@ export default function Team() {
           >
             <Sparkles size={13} className={estimating ? "animate-pulse" : ""} /> {estimating ? "Estimating…" : "Estimate open tasks"}
           </button>
-          <button className="btn btn-sm" onClick={() => load(true)} disabled={loading}>
+          <button className="btn btn-sm" onClick={() => load(true)} disabled={loading} title={data ? `Updated ${ago(data.now, now)}` : ""}>
             <RotateCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
+          </button>
+          <button className="btn btn-sm" onClick={toggleAuto} title={auto ? "Refreshing every 15 s (ClickUp every 2 min). Click to stop." : "Click to refresh automatically"}>
+            <span className="dot" style={{ background: auto ? "var(--green)" : "#cfcfca" }} /> Auto-refresh {auto ? "on" : "off"}
+            {auto && data && <span className="font-normal text-[var(--muted)]"> · {Math.max(0, Math.round((now - data.now) / 1000))}s ago</span>}
           </button>
         </div>
       </div>
@@ -440,54 +546,85 @@ export default function Team() {
       {!data && <TeamSkeleton />}
 
       {/* Working now */}
-      {data && data.running.length > 0 && (
-        <div className="mt-8">
-          <h2 className="mb-3 text-[13.5px] font-semibold">
-            Working now <span className="tnum font-normal text-[var(--muted)]">{data.running.length}</span>
-          </h2>
-          <div className="card divide-y divide-[var(--line)]">
-            {data.running.map((r) => (
-              <div key={r.id} className="flex items-center gap-3 px-5 py-2.5 text-[13.5px]">
-                <span className="dot" style={{ background: "var(--green)" }} />
-                <Avatar name={r.person} size={24} />
-                <span className="w-[120px] shrink-0 truncate font-medium">{r.person}</span>
-                <button className="min-w-0 flex-1 truncate text-left hover:underline" onClick={() => setOpenTask(r.task_id)}>
-                  {r.task_title} <span className="text-[var(--muted)]">· {r.project}</span>
-                </button>
-                <TimerButton taskId={r.task_id} assignee={r.person} running={r} now={now} onChanged={reload} />
+      {data && data.running.length > 0 && (() => {
+        // Grouped by person in your order (Ali first), filterable by person and priority
+        const prioOf = (taskId: string) => all.find((t) => t.id === taskId)?.priority ?? "normal";
+        const shown = data.running
+          .filter((r) => (!wPerson || r.person === wPerson) && (!wPrio || prioOf(r.task_id) === wPrio))
+          .sort((a, b) => byPerson(a.person, b.person) || (PRIORITY_RANK[prioOf(a.task_id)] ?? 2) - (PRIORITY_RANK[prioOf(b.task_id)] ?? 2) || a.started_at - b.started_at);
+        const people = [...new Set(data.running.map((r) => r.person))].sort(byPerson);
+        return (
+          <div className="mt-8">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-[13.5px] font-semibold">
+                Working now <span className="tnum font-normal text-[var(--muted)]">{shown.length === data.running.length ? data.running.length : `${shown.length} of ${data.running.length}`}</span>
+              </h2>
+              <div className="flex items-center gap-1">
+                <Dropdown label="Person" align="right" value={wPerson} onChange={setWPerson} options={[{ value: "", label: "Everyone" }, ...people.map((p) => ({ value: p, label: `${p} · ${data.running.filter((r) => r.person === p).length}` }))]} />
+                <Dropdown label="Priority" align="right" value={wPrio} onChange={setWPrio} options={PRIORITY_OPTIONS} />
               </div>
-            ))}
+            </div>
+            <div className="card divide-y divide-[var(--line)]">
+              {shown.map((r, i) => {
+                const p = prioOf(r.task_id);
+                const first = shown[i - 1]?.person !== r.person;
+                return (
+                  <div key={r.id} className={`flex items-center gap-3 px-5 py-2.5 text-[13.5px] ${first && i > 0 ? "border-t-2 !border-t-[var(--line-2)]" : ""}`}>
+                    <span className="dot" style={{ background: "var(--green)" }} />
+                    <Avatar name={r.person} size={24} />
+                    <span className={`w-[140px] shrink-0 truncate ${first ? "font-medium" : "text-[var(--muted)]"}`}>{r.person}</span>
+                    <button className="min-w-0 flex-1 truncate text-left hover:underline" onClick={() => setOpenTask(r.task_id)}>
+                      {p !== "normal" && <Pill tone={PRIORITY_TONE[p]}>{p}</Pill>} {r.task_title} <span className="text-[var(--muted)]">· {r.project}</span>
+                    </button>
+                    <TimerButton taskId={r.task_id} assignee={r.person} running={r} now={now} onChanged={reload} />
+                  </div>
+                );
+              })}
+              {!shown.length && <div className="p-6 text-center text-[13px] text-[var(--muted)]">No running clocks match these filters</div>}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* People */}
-      <div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-        {(data?.team ?? []).map((name) => {
+      <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[...(data?.team ?? [])].sort(byPerson).map((name) => {
           const mine = all.filter((t) => t.assignee === name);
           const open = mine.filter((t) => !isDone(t.status));
           const active = open.filter((t) => /progress|revision/.test(t.status));
           const blocked = open.filter((t) => /block/.test(t.status));
           const working = data?.running.find((r) => r.person === name);
+          // The task the timer button is for: the one being timed, else the first in progress, else the next open one
+          const current = working ? all.find((t) => t.id === working.task_id) : (active[0] ?? open[0]);
           const p = perf.get(name);
           const on = person === name;
           return (
-            <button key={name} onClick={() => setPerson(on ? null : name)} className={`card p-4 text-left transition ${on ? "!border-[#171717]" : "hover:border-[var(--line-2)]"} ${person && !on ? "opacity-50" : ""}`}>
-              <div className="flex items-center gap-2.5">
-                <Avatar name={name} size={30} />
-                <div className="min-w-0">
-                  <div className="truncate text-[14px] font-medium">{name}</div>
-                  <div className="text-[12px] text-[var(--muted)]">{open.length} open · {active.length} active</div>
+            <div
+              key={name}
+              role="button"
+              tabIndex={0}
+              onClick={() => setPerson(on ? null : name)}
+              onKeyDown={(e) => e.key === "Enter" && setPerson(on ? null : name)}
+              className={`card cursor-pointer p-5 text-left transition ${on ? "!border-[#171717]" : "hover:border-[var(--line-2)]"} ${person && !on ? "opacity-50" : ""}`}
+            >
+              <div className="flex items-center gap-3">
+                <Avatar name={name} size={36} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[15.5px] font-medium">{name}</div>
+                  <div className="text-[13px] text-[var(--muted)]">
+                    {open.length} open · {active.length} active
+                  </div>
                 </div>
-              </div>
-              <div className="mt-3 truncate text-[12.5px] text-[var(--ink-2)]">
-                {working ? <span className="text-[var(--green)]">● {working.task_title}</span> : active[0] ? active[0].title : blocked.length ? "Blocked" : "Nothing in progress"}
-              </div>
-              <div className="mt-2 flex items-center justify-between text-[12px] text-[var(--muted)]">
-                <span className="tnum">{p?.trackedToday ? `${hm(p.trackedToday)} today` : "No time today"}</span>
                 {blocked.length > 0 && <Pill tone="red">{blocked.length} blocked</Pill>}
               </div>
-            </button>
+              <div className="mt-4 truncate text-[14px] text-[var(--ink-2)]">
+                {working ? <span className="text-[var(--green)]">● {working.task_title}</span> : active[0] ? active[0].title : blocked.length ? "Blocked" : "Nothing in progress"}
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-2 text-[13px] text-[var(--muted)]">
+                <span className="tnum">{liveFor(name, p?.trackedToday ?? 0) >= 1 ? `${hm(Math.round(liveFor(name, p?.trackedToday ?? 0)))} today` : "No time today"}</span>
+                {current && (data?.timersOn || working) && <TimerButton taskId={current.id} assignee={name} running={working} now={now} onChanged={reload} />}
+              </div>
+            </div>
           );
         })}
       </div>
@@ -509,9 +646,16 @@ export default function Team() {
                 {FILTERS.map((x) => (
                   <button key={x} onClick={() => setF(x)} className={`rounded-full px-3 py-1 text-[12.5px] ${f === x ? "bg-[#171717] text-white" : "text-[var(--ink-2)] hover:bg-white"}`}>
                     {x}
+                    {x !== "All" && (
+                      <span className={`tnum ml-1 ${f === x ? "text-white/70" : "text-[var(--muted)]"}`}>
+                        {all.filter((t) => (!person || t.assignee === person) && (!project || t.project === project) && (!prio || (t.priority ?? "normal") === prio) && bucket(t.status) === x).length}
+                      </span>
+                    )}
                   </button>
                 ))}
-                <span className="ml-1">
+                <span className="ml-1 flex flex-wrap items-center gap-1">
+                  <Dropdown label="Person" align="right" value={person ?? ""} onChange={(v) => setPerson(v || null)} options={[{ value: "", label: "Everyone" }, ...[...(data?.team ?? [])].sort(byPerson).map((p) => ({ value: p, label: p }))]} />
+                  <Dropdown label="Priority" align="right" value={prio} onChange={setPrio} options={PRIORITY_OPTIONS} />
                   <Dropdown label="Sort" align="right" value={sort} onChange={setSort} options={Object.entries(SORTS).map(([k, v]) => ({ value: k, label: v.label }))} />
                 </span>
               </div>
@@ -530,7 +674,7 @@ export default function Team() {
                 </thead>
                 <tbody>
                   {tasks.map((t) => {
-                    const tracked = (data?.tracked[t.id] ?? 0) || t.spentMin;
+                    const tracked = Math.round(trackedOf(t));
                     const e = data?.estimates[t.id];
                     const target = targetOf(t);
                     const over = target && tracked > target;
@@ -548,7 +692,21 @@ export default function Team() {
                             <Avatar name={t.assignee} size={22} /> {t.assignee}
                           </span>
                         </td>
-                        <td className="px-4 py-3">{live ? <StatusSelect taskId={t.id} status={t.status} onChanged={reload} /> : <Pill>{t.status}</Pill>}</td>
+                        <td className="px-4 py-3">
+                          {live ? <StatusSelect taskId={t.id} status={t.status} onChanged={reload} /> : <Pill>{t.status}</Pill>}
+                          {(() => {
+                            // How long it has been in this status, and where its time went before
+                            const s = data?.inStatus?.[t.id];
+                            if (!s || s.status !== t.status) return null;
+                            const before = Object.entries(s.spent).filter(([, m]) => m >= 1).sort((a, b) => b[1] - a[1]);
+                            return (
+                              <div className="tnum mt-1 whitespace-nowrap text-[11.5px] text-[var(--muted)]" title={before.length ? `Before: ${before.map(([st, m]) => `${st} ${dur(m)}`).join(" · ")}` : undefined}>
+                                for {dur((now - s.since) / 60000)}
+                                {before.length > 0 && ` · ${before.length} earlier`}
+                              </div>
+                            );
+                          })()}
+                        </td>
                         <td className={`tnum whitespace-nowrap px-4 py-3 ${over ? "text-[var(--red)]" : ""}`}>
                           {hm(tracked)}
                           {target ? (
@@ -560,7 +718,7 @@ export default function Team() {
                           ) : null}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-[var(--ink-2)]">{t.due ?? "—"}</td>
-                        <td className="px-4 py-3 text-right">{live && !isDone(t.status) && (data?.timersOn || runningFor(t.id)) && <TimerButton taskId={t.id} assignee={t.assignee} running={runningFor(t.id)} now={now} onChanged={reload} />}</td>
+                        <td className="px-4 py-3 text-right">{live && (!isDone(t.status) || runningFor(t.id)) && <TimerButton taskId={t.id} assignee={t.assignee} running={runningFor(t.id)} now={now} onChanged={reload} savedMin={data?.tracked[t.id] ?? 0} />}</td>
                       </tr>
                     );
                   })}
@@ -598,8 +756,8 @@ export default function Team() {
                         <td className="px-4 py-2.5">
                           {p.done} <span className="text-[var(--muted)]">({p.doneThisWeek})</span>
                         </td>
-                        <td className="px-4 py-2.5">{hm(p.trackedToday)}</td>
-                        <td className="px-4 py-2.5">{hm(p.trackedWeek)}</td>
+                        <td className="px-4 py-2.5">{hm(Math.round(liveFor(p.person, p.trackedToday)))}</td>
+                        <td className="px-4 py-2.5">{hm(Math.round(liveFor(p.person, p.trackedWeek)))}</td>
                         <td className="px-4 py-2.5">
                           {p.accuracy ? (
                             <span className={p.accuracy.ratio > 1.2 ? "text-[var(--red)]" : p.accuracy.ratio < 0.8 ? "text-[var(--green)]" : ""}>

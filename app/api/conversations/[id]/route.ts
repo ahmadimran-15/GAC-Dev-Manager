@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getConversation, getMessages, summarize, updateConversation } from "@/lib/store";
 import { all } from "@/lib/db";
+import { numberNames, withNames } from "@/lib/whatsapp";
 import { previewTags, sendToConversation, warmTagging } from "@/lib/inbound";
 import { generateReply, suggestReply, summarizeConversation } from "@/lib/ai";
 
@@ -20,9 +21,11 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       id,
     ),
   ]);
+  const names = await numberNames();
   return NextResponse.json({
     conversation: { ...summary, subject: c.subject },
-    messages,
+    // "@923…" mentions and "+923…" senders shown as names
+    messages: messages.map((m) => ({ ...m, text: m.text ? withNames(m.text, names) : m.text, transcript: m.transcript ? withNames(m.transcript, names) : m.transcript })),
     drafts,
     links: links.map((l) => ({ ...l, created_at: Number(l.created_at), message_ids: JSON.parse(l.message_ids || "[]") as string[] })),
   });

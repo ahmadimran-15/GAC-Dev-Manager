@@ -11,6 +11,8 @@ import RecipientPicker, { type RecipientTarget } from "@/components/RecipientPic
 export default function DraftCard({ d, now, inThread = false }: { d: DraftRow; now: number; inThread?: boolean }) {
   const { refresh, toast, state } = useLive();
   const conv = d.conv_id ? state?.conversations.find((c) => c.id === d.conv_id) : undefined;
+  // An update about a ClickUp task goes on that task as a comment: no channel, no recipient, no quoting
+  const onTask = conv?.channel === "clickup";
   const [text, setText] = useState(d.text);
   const [mode, setMode] = useState<"reply" | "pick">(d.conv_id ? "reply" : "pick");
   const [from, setFrom] = useState("");
@@ -77,14 +79,15 @@ export default function DraftCard({ d, now, inThread = false }: { d: DraftRow; n
         {d.conv_id && (
           <div className="flex gap-1 text-[12.5px]">
             <button onClick={() => setMode("reply")} className={`rounded-full px-2.5 py-0.5 ${mode === "reply" ? "bg-[#171717] text-white" : "text-[var(--ink-2)] hover:bg-[var(--hover)]"}`}>
-              Reply to {d.conv_name ?? "client"}
+              {onTask ? "Post on the task" : `Reply to ${d.conv_name ?? "client"}`}
             </button>
             <button onClick={() => setMode("pick")} className={`rounded-full px-2.5 py-0.5 ${mode === "pick" ? "bg-[#171717] text-white" : "text-[var(--ink-2)] hover:bg-[var(--hover)]"}`}>
               Send somewhere else
             </button>
           </div>
         )}
-        {mode === "reply" && conv && <FromPicker channel={conv.channel} account={conv.account} value={from} onChange={setFrom} />}
+        {mode === "reply" && onTask && <p className="text-[12.5px] text-[var(--muted)]">Goes on the ClickUp task “{conv?.name}” as a comment.</p>}
+        {mode === "reply" && conv && !onTask && <FromPicker channel={conv.channel} account={conv.account} value={from} onChange={setFrom} />}
         {mode === "pick" && <RecipientPicker value={target} onChange={setTarget} />}
       </div>
 
@@ -93,7 +96,7 @@ export default function DraftCard({ d, now, inThread = false }: { d: DraftRow; n
           Discard
         </button>
         <button className="btn btn-dark btn-sm ml-auto" disabled={busy || !text.trim() || !ready} onClick={() => act("approve")}>
-          Approve & send
+          {onTask && mode === "reply" ? "Approve & post on the task" : "Approve & send"}
         </button>
       </div>
     </div>

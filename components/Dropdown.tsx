@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Search } from "lucide-react";
 
 export interface DropdownOption {
@@ -19,6 +19,7 @@ export default function Dropdown({
   align = "left",
   bare = false,
   up = false,
+  block = false,
 }: {
   label?: string;
   value: string;
@@ -28,6 +29,7 @@ export default function Dropdown({
   align?: "left" | "right";
   bare?: boolean; // no border (for compact toolbars)
   up?: boolean; // open above (for controls near the bottom of the screen)
+  block?: boolean; // fill the width it is given (for a grid of filters)
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -52,13 +54,37 @@ export default function Dropdown({
     if (!open) setQ("");
   }, [open]);
 
+  // Keep the open list inside the panel that clips it (or the screen): narrow it if it can't fit, then slide it in
+  // if it pokes out on either side. Sizes are measured in layout px, so the app's UI zoom doesn't throw it off.
+  const menuRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const m = menuRef.current;
+    if (!open || !m) return;
+    m.style.translate = "";
+    m.style.maxWidth = "";
+    let b = { left: 0, right: window.innerWidth };
+    for (let el = ref.current?.parentElement; el && el !== document.body; el = el.parentElement) {
+      if (/(hidden|auto|scroll|clip)/.test(getComputedStyle(el).overflowX)) {
+        const r = el.getBoundingClientRect();
+        b = { left: Math.max(r.left, 0), right: Math.min(r.right, window.innerWidth) };
+        break;
+      }
+    }
+    const z = m.getBoundingClientRect().width / (m.offsetWidth || 1) || 1;
+    const room = (b.right - b.left - 16) / z;
+    if (m.offsetWidth > room) m.style.maxWidth = `${room}px`;
+    const r = m.getBoundingClientRect();
+    const dx = r.left < b.left + 8 ? b.left + 8 - r.left : r.right > b.right - 8 ? b.right - 8 - r.right : 0;
+    if (dx) m.style.translate = `${dx / z}px 0`;
+  }, [open, q]);
+
   return (
-    <div ref={ref} className="relative inline-block">
+    <div ref={ref} className={`relative min-w-0 max-w-full ${block ? "block" : "inline-block"}`}>
       <button
         type="button"
         title={title}
         onClick={() => setOpen((o) => !o)}
-        className={`inline-flex h-8 max-w-[320px] items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] transition ${
+        className={`inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-[12.5px] transition ${block ? "w-full" : "max-w-[min(320px,100%)]"} ${
           bare ? "hover:bg-[var(--hover)]" : `border bg-white ${open ? "border-[#a8a8a2]" : "border-[var(--line-2)] hover:border-[#a8a8a2]"}`
         }`}
       >
@@ -68,6 +94,7 @@ export default function Dropdown({
       </button>
       {open && (
         <div
+          ref={menuRef}
           className={`fade-in absolute ${up ? "bottom-[calc(100%+4px)]" : "top-[calc(100%+4px)]"} z-[70] w-max min-w-full max-w-[340px] overflow-hidden rounded-xl border border-[var(--line)] bg-white shadow-[0_12px_32px_-12px_rgba(0,0,0,0.22)] ${align === "right" ? "right-0" : "left-0"}`}
         >
           {searchable && (

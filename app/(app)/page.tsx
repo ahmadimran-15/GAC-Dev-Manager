@@ -85,7 +85,7 @@ export default function Overview() {
         </Section>
 
         <aside className="space-y-10">
-          <Section title="From your team" count={state.drafts.length}>
+          <Section title="From your team" count={state.drafts.length} right={<Link href="/inbox?tab=team" className="text-[13px] text-[var(--ink-2)] hover:text-[var(--ink)]">Team updates →</Link>}>
             <div className="card divide-y divide-[var(--line)] px-4">
               {state.drafts.map((d) => (
                 <DraftCard key={d.id} d={d} now={now} />

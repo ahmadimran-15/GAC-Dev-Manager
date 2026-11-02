@@ -1,13 +1,14 @@
 "use client";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Check, CheckCheck, ChevronDown, ChevronUp, ListPlus, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, ChevronDown, ChevronUp, ExternalLink, ListPlus, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
 import Composer from "@/components/Composer";
 import MessageText, { plainText } from "@/components/MessageText";
 import type { ConvSummary, Message } from "@/lib/store";
 import { api, useLive, type DraftRow } from "@/components/Live";
-import { Avatar, CHANNELS, Channel, Pill, STATUS_TONE, Waiting, ago } from "@/components/ui";
+import { Avatar, CHANNELS, Channel, Pill, STATUS_TONE, Ticks, Waiting, ago } from "@/components/ui";
 import DraftCard from "@/components/DraftCard";
+import TeamUpdates from "@/components/TeamUpdates";
 import TaskDrawer, { type BoardLite } from "@/components/TaskDrawer";
 import { ReplyBox, ackText } from "@/components/WaitingCard";
 import { ListSkeleton, ThreadSkeleton } from "@/components/Skeleton";
@@ -25,18 +26,6 @@ interface Detail {
 const REMIND = [null, 5, 15, 30, 60] as const;
 
 
-// WhatsApp ticks for our messages: ✓ sent, ✓✓ delivered, blue ✓✓ read, red ! failed
-function Ticks({ status }: { status: string | null }) {
-  if (status === "failed") return <span className="ml-1 font-semibold text-[var(--red)]" title="Not delivered">!</span>;
-  if (!status || !["sent", "delivered", "read"].includes(status)) return null;
-  const Icon = status === "sent" ? Check : CheckCheck;
-  return (
-    <span className="ml-1 inline-flex translate-y-[2px]" title={status === "read" ? "Read" : status === "delivered" ? "Delivered" : "Sent"}>
-      <Icon size={13} strokeWidth={2.4} style={{ color: status === "read" ? "#34b7f1" : "var(--muted)" }} />
-    </span>
-  );
-}
-
 const dayLabel = (t: number) => {
   const d = new Date(t);
   const today = new Date();
@@ -52,6 +41,7 @@ function Inbox() {
   const router = useRouter();
   const { state, refresh, send, toast } = useLive();
   const [filter, setFilter] = useState<"all" | "waiting">("all");
+  const [proj, setProj] = useState(""); // filter the chats by ClickUp project
   const [channel, setChannel] = useState("all");
   const [contextBusy, setContextBusy] = useState(false);
   const contextAsked = useRef<Set<string>>(new Set());
@@ -103,10 +93,26 @@ function Inbox() {
   // "whatsapp", "groups", "email", "team", or one mailbox / number (an account key)
   const inChannel = (c: ConvSummary) =>
     channel === "all" ||
-    (channel === "groups" ? isGroup(c) : channel === "team" ? c.internal : channel === "whatsapp" || channel === "email" ? c.channel === channel : c.account.toLowerCase() === channel.toLowerCase());
-  const convs = (state?.conversations ?? []).filter(
-    (c) => (filter === "all" || c.waiting) && inChannel(c) && (!q || `${c.name} ${c.company ?? ""} ${c.project ?? ""} ${c.externalId}`.toLowerCase().includes(q.toLowerCase())),
-  );
+    (channel === "groups"
+      ? isGroup(c)
+      : channel === "tasks"
+        ? c.channel === "clickup"
+        : channel === "team"
+          ? c.internal && c.channel !== "clickup"
+          : channel === "whatsapp" || channel === "email"
+            ? c.channel === channel
+            : c.account.toLowerCase() === channel.toLowerCase());
+  const convs = (state?.conversations ?? [])
+    .filter(
+      (c) =>
+        (filter === "all" || c.waiting) &&
+        inChannel(c) &&
+        (!proj || c.project === proj) &&
+        (!q || `${c.name} ${c.company ?? ""} ${c.project ?? ""} ${c.externalId}`.toLowerCase().includes(q.toLowerCase())),
+    )
+    // Newest first: the chat that spoke last sits at the top
+    .sort((a, b) => (b.last?.at ?? 0) - (a.last?.at ?? 0));
+  const projects = [...new Set((state?.conversations ?? []).map((c) => c.project).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b));
   const mailboxes = (state?.accounts ?? []).filter((a) => a.kind === "email");
   const id = params.get("c") ?? state?.conversations[0]?.id ?? null;
   // Phone: one pane at a time, the list until a chat is tapped, then the chat with a back arrow
@@ -230,8 +236,8 @@ function Inbox() {
   }, [c?.id, stale, showContext]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="mx-auto w-full md:px-6 md:py-6 xl:px-10">
-      <div className="card grid h-[calc(100dvh-120px-env(safe-area-inset-bottom))] grid-cols-1 overflow-hidden max-md:!rounded-none max-md:!border-0 md:h-[calc(100vh/var(--ui-zoom)-104px)] md:min-h-[560px] md:grid-cols-[280px_minmax(0,1fr)] lg:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[400px_minmax(0,1fr)]">
+    <div className="md:pb-6">
+      <div className="card grid h-[calc(100dvh-168px-env(safe-area-inset-bottom))] grid-cols-1 overflow-hidden max-md:!rounded-none max-md:!border-0 md:h-[calc(100vh/var(--ui-zoom)-152px)] md:min-h-[560px] md:grid-cols-[280px_minmax(0,1fr)] lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[380px_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)]">
         {/* List */}
         <div className={`min-h-0 flex-col border-r border-[var(--line)] ${chosen ? "hidden md:flex" : "flex"}`}>
           <div className="space-y-2.5 p-4">
@@ -244,28 +250,48 @@ function Inbox() {
                 <PenSquare size={15} />
               </button>
             </div>
+            {/* All / Waiting, then the two filters on their own line so nothing collides in a narrow list */}
             <div className="flex items-center gap-1">
               {(["all", "waiting"] as const).map((f) => (
-                <button key={f} onClick={() => setFilter(f)} className={`rounded-full px-3 py-1 text-[12.5px] ${filter === f ? "bg-[#171717] text-white" : "text-[var(--ink-2)] hover:bg-[var(--hover)]"}`}>
-                  {f === "all" ? "All" : `Waiting · ${state?.stats.waiting ?? 0}`}
+                <button key={f} onClick={() => setFilter(f)} className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-[12.5px] ${filter === f ? "bg-[#171717] text-white" : "text-[var(--ink-2)] hover:bg-[var(--hover)]"}`}>
+                  {f === "all" ? "All" : "Waiting"}
+                  <span className={`tnum ml-1 ${filter === f ? "text-white/70" : "text-[var(--muted)]"}`}>{f === "all" ? (state?.conversations.length ?? 0) : (state?.stats.waiting ?? 0)}</span>
                 </button>
               ))}
-              <div className="ml-auto">
-                <Dropdown
-                  bare
-                  align="right"
-                  value={channel}
-                  onChange={setChannel}
-                  options={[
-                    { value: "all", label: "All channels" },
-                    { value: "whatsapp", label: "WhatsApp" },
-                    { value: "groups", label: "WhatsApp groups" },
-                    { value: "email", label: "Email" },
-                    ...mailboxes.map((m) => ({ value: m.address, label: m.address, hint: "mailbox" })),
-                    { value: "team", label: "Not clients", hint: "team, personal" },
-                  ]}
-                />
-              </div>
+              {(proj || channel !== "all") && (
+                <button
+                  className="ml-auto shrink-0 whitespace-nowrap text-[12px] text-[var(--muted)] hover:text-[var(--ink)]"
+                  onClick={() => {
+                    setProj("");
+                    setChannel("all");
+                  }}
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+            <div className="mt-1 grid grid-cols-2 gap-1">
+              <Dropdown
+                block
+                value={proj}
+                onChange={setProj}
+                options={[{ value: "", label: "All projects" }, ...projects.map((p) => ({ value: p, label: p, hint: `${(state?.conversations ?? []).filter((c) => c.project === p).length}` }))]}
+              />
+              <Dropdown
+                block
+                align="right"
+                value={channel}
+                onChange={setChannel}
+                options={[
+                  { value: "all", label: "All channels" },
+                  { value: "whatsapp", label: "WhatsApp" },
+                  { value: "groups", label: "WhatsApp groups" },
+                  { value: "email", label: "Email" },
+                  { value: "tasks", label: `ClickUp tasks${state?.stats.tasks ? ` · ${state.stats.tasks}` : ""}`, hint: "task comments" },
+                  ...mailboxes.map((m) => ({ value: m.address, label: m.address, hint: "mailbox" })),
+                  { value: "team", label: "Not clients", hint: "team, personal" },
+                ]}
+              />
             </div>
           </div>
           <div className="scroll min-h-0 flex-1 px-2 pb-2">
@@ -276,32 +302,36 @@ function Inbox() {
               <button
                 key={x.id}
                 onClick={() => router.replace(`/inbox?c=${x.id}`)}
-                className={`relative flex w-full gap-3 rounded-xl px-3 py-3 text-left transition ${
+                className={`relative flex w-full gap-3 rounded-xl px-3 py-2.5 text-left transition ${
                   open ? "bg-white shadow-[0_0_0_1px_var(--line-2),0_2px_8px_-4px_rgba(0,0,0,0.12)]" : "hover:bg-[var(--bg)]/70"
                 }`}
               >
-                {open && <span className="absolute bottom-3 left-0 top-3 w-[3px] rounded-full bg-[#171717]" />}
+                {open && <span className="absolute bottom-2.5 left-0 top-2.5 w-[3px] rounded-full bg-[#171717]" />}
                 <Avatar name={x.name} size={36} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={`flex min-w-0 items-center gap-1.5 text-[14px] ${x.waiting || unread ? "font-semibold" : ""}`}>
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  {/* Name, then how long they've waited — never wrapped */}
+                  <div className="flex items-baseline gap-2">
+                    <span className={`flex min-w-0 flex-1 items-center gap-1.5 text-[14px] leading-snug ${x.waiting || unread ? "font-semibold" : ""}`}>
                       {unread && <span className="dot shrink-0" style={{ background: "#1d63b5" }} title="New since you last opened it" />}
                       <span className="truncate">{x.name}</span>
                     </span>
-                    {x.waiting && x.waitingSince ? <Waiting since={x.waitingSince} now={now} /> : <span className="text-[11.5px] text-[var(--muted)]">{x.last ? ago(x.last.at, now) : ""}</span>}
+                    {x.waiting && x.waitingSince ? (
+                      <Waiting since={x.waitingSince} now={now} />
+                    ) : (
+                      <span className="shrink-0 whitespace-nowrap text-[11.5px] text-[var(--muted)]">{x.last ? ago(x.last.at, now) : ""}</span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  {/* The channel, and for a task its project */}
+                  <div className="flex items-center gap-1.5 text-[11.5px] text-[var(--muted)]">
                     <Channel c={x.channel} withLabel={false} />
-                    <span className={`truncate text-[13px] ${x.waiting || unread ? "text-[var(--ink)]" : "text-[var(--muted)]"}`}>
-                      {x.last?.direction === "out" ? (x.repliedBy ? `${x.repliedBy.name}: ` : "You: ") : ""}
-                      {plainText(x.last?.text)}
-                    </span>
+                    {(x.project || x.company) && <span className="truncate">{x.project ?? x.company}</span>}
+                    {x.internal && <Pill>Not a client</Pill>}
+                    {x.repliedBy && <Pill tone="blue">{x.repliedBy.name} replied</Pill>}
                   </div>
-                  {(x.repliedBy || x.internal) && (
-                    <div className="mt-1">
-                      {x.internal ? <Pill>Not a client</Pill> : <Pill tone="blue">Replied by {x.repliedBy!.name}</Pill>}
-                    </div>
-                  )}
+                  <div className={`truncate text-[13px] leading-snug ${x.waiting || unread ? "text-[var(--ink)]" : "text-[var(--muted)]"}`}>
+                    {x.last?.direction === "out" ? (x.repliedBy ? (String(x.last.text ?? "").startsWith(`${x.repliedBy.name}: `) ? "" : `${x.repliedBy.name}: `) : "You: ") : ""}
+                    {plainText(x.last?.text)}
+                  </div>
                 </div>
               </button>
               );
@@ -332,6 +362,11 @@ function Inbox() {
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                  {c.channel === "clickup" && (
+                    <a href={`https://app.clickup.com/t/${c.externalId}`} target="_blank" className="btn btn-sm" title="Open this task in ClickUp, with all its comments">
+                      Open task <ExternalLink size={13} />
+                    </a>
+                  )}
                   <button className={`btn btn-sm ${selecting ? "btn-dark" : ""}`} onClick={startTask}>
                     <ListPlus size={14} /> {selecting ? `Create task from ${sel.size}` : "Create task"}
                   </button>
@@ -432,7 +467,13 @@ function Inbox() {
 
             <div className="scroll min-h-0 flex-1 px-3 py-4 md:px-6 md:py-5">
               {detail.messages.map((m, i) => {
-                const mine = m.direction === "out";
+                // A teammate (team number) writing in the group from their own phone: counts as our reply,
+                // but it's their message, so it sits on the left with their name, like in WhatsApp
+                const byTeammate = m.direction === "out" && !!m.sent_by && !["me", "phone"].includes(m.sent_by) && (m.text ?? "").startsWith(`${m.sent_by}: `);
+                const mine = m.direction === "out" && !byTeammate;
+                const body = byTeammate ? text(m).slice(m.sent_by!.length + 2) : text(m);
+                // Who wrote it: a teammate in a group, or the person who left this ClickUp comment
+                const author = !mine && !byTeammate && m.sent_by && !["me", "phone"].includes(m.sent_by) ? m.sent_by : null;
                 const newDay = i === 0 || dayLabel(detail.messages[i - 1].created_at) !== dayLabel(m.created_at);
                 const picked = sel.has(m.id);
                 return (
@@ -453,21 +494,27 @@ function Inbox() {
                               ? m.ack
                                 ? "rounded-br-md border border-[var(--line-2)] bg-white text-[var(--ink-2)]"
                                 : "rounded-br-md bg-[#171717] text-white"
-                              : `rounded-bl-md bg-[var(--bg)] text-[var(--ink)] ${picked ? "ring-2 ring-[#171717]" : ""} ${selecting ? "cursor-pointer" : ""}`
+                              : `rounded-bl-md ${byTeammate ? "bg-[#eaf2fb]" : "bg-[var(--bg)]"} text-[var(--ink)] ${picked ? "ring-2 ring-[#171717]" : ""} ${selecting ? "cursor-pointer" : ""}`
                           }`}
                         >
+                          {byTeammate && <div className="mb-0.5 text-[12px] font-semibold text-[var(--blue)]">{m.sent_by} · team</div>}
+                          {author && (
+                            <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold">
+                              <Avatar name={author} size={18} /> {author}
+                            </div>
+                          )}
                           {m.kind === "voice" && (
                             <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-[var(--muted)]">
                               <Mic size={13} /> Voice note
                             </div>
                           )}
                           {m.kind === "voice" && m.media_path && <audio controls src={`/api/media/${m.media_path}`} className="mb-2 h-9 w-64 max-w-full" />}
-                          {text(m) ? <MessageText text={text(m)} dark={mine && !m.ack} /> : (m.kind === "voice" ? <span className="italic text-[var(--muted)]">{state?.connections.transcription ? "Transcribing…" : "Add GOOGLE_AI_API_KEY to transcribe voice notes"}</span> : null)}
+                          {body ? <MessageText text={body} dark={mine && !m.ack} /> : (m.kind === "voice" ? <span className="italic text-[var(--muted)]">{state?.connections.transcription ? "Transcribing…" : "Add GOOGLE_AI_API_KEY to transcribe voice notes"}</span> : null)}
                         </div>
                         <div className="mt-1 px-1 text-[11px] text-[var(--muted)]">
                           {mine && m.ack ? "Acknowledged · " : ""}
                           {mine && m.sent_by && m.sent_by !== "me" ? `${m.sent_by === "phone" ? "From your phone" : `Written by ${m.sent_by}`} · ` : ""}
-                          {m.via ? `${mine ? "from" : "to"} ${m.via} · ` : ""}
+                          {m.via && !byTeammate ? `${c.channel === "clickup" ? "on" : mine ? "from" : "to"} ${m.via} · ` : ""}
                           {time(m.created_at)}
                           {m.status === "simulated" ? " · test mode" : ""}
                           {mine && c.channel === "whatsapp" && <Ticks status={m.status} />}
@@ -556,10 +603,34 @@ function Inbox() {
   );
 }
 
+// Sub-tabs: client chats, and the updates your team wrote for you to approve and send
+function InboxTabs() {
+  const params = useSearchParams();
+  const router = useRouter();
+  const { state } = useLive();
+  const team = params.get("tab") === "team";
+  const tab = (on: boolean) => `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13.5px] transition ${on ? "bg-white font-medium text-[var(--ink)] shadow-[0_0_0_1px_var(--line)]" : "text-[var(--ink-2)] hover:text-[var(--ink)]"}`;
+  return (
+    <div className="mx-auto w-full md:px-6 md:pt-4 xl:px-10">
+      <div className="flex items-center gap-1 px-4 py-2 md:mb-3 md:px-0 md:py-0">
+        <button className={tab(!team)} onClick={() => router.replace("/inbox")}>
+          Chats
+          {(state?.stats.waiting ?? 0) > 0 && <span className="tnum rounded-full bg-[var(--red)] px-1.5 text-[10.5px] font-semibold text-white">{state!.stats.waiting}</span>}
+        </button>
+        <button className={tab(team)} onClick={() => router.replace("/inbox?tab=team")}>
+          Team updates
+          {(state?.drafts.length ?? 0) > 0 && <span className="tnum rounded-full bg-[var(--amber)] px-1.5 text-[10.5px] font-semibold text-white">{state!.drafts.length}</span>}
+        </button>
+      </div>
+      {team ? <TeamUpdates /> : <Inbox />}
+    </div>
+  );
+}
+
 export default function InboxPage() {
   return (
     <Suspense>
-      <Inbox />
+      <InboxTabs />
     </Suspense>
   );
 }

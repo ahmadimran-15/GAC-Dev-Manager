@@ -7,6 +7,8 @@ import HealthPanel from "@/components/HealthPanel";
 import LoginsManager from "@/components/LoginsManager";
 import GroupsManager from "@/components/GroupsManager";
 import TeamNumbersManager from "@/components/TeamNumbersManager";
+import TimeTrackingSettings from "@/components/TimeTrackingSettings";
+import CurrentProjects from "@/components/CurrentProjects";
 import { ago } from "@/components/ui";
 
 function Row({ name, ok, detail, children }: { name: string; ok: boolean | null; detail: React.ReactNode; children?: React.ReactNode }) {
@@ -93,6 +95,12 @@ export default function Settings() {
 
       <h2 id="health" className="mb-1 mt-10 text-[13.5px] font-semibold">System health</h2>
       <HealthPanel />
+
+      <h2 id="projects" className="mb-1 mt-10 text-[13.5px] font-semibold">Current projects</h2>
+      <CurrentProjects />
+
+      <h2 id="time" className="mb-1 mt-10 text-[13.5px] font-semibold">Time tracking</h2>
+      <TimeTrackingSettings />
 
       <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Reminders</h2>
       <div className="card divide-y divide-[var(--line)] px-5">

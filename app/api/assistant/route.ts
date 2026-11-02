@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { answerFrom, interpret } from "@/lib/ai";
 import { getMessages, listConversations, msgText } from "@/lib/store";
-import { allMembers, board } from "@/lib/clickup";
+import { allMembers, board, planProjectMove } from "@/lib/clickup";
 import { searchClickUp, searchEmail, searchMessages } from "@/lib/search";
 
 // Turns a spoken/typed instruction into an action to confirm, or runs a search and answers.
@@ -35,6 +35,18 @@ export async function POST(req: Request) {
       const results = source === "email" ? await searchEmail(cmd.query) : source === "messages" ? await searchMessages(cmd.query) : await searchClickUp(cmd.query);
       return NextResponse.json({ intent: "answer", answer: await answerFrom(String(text), source, results), searched: { source, query: cmd.query } });
     }
+    // "Move Does it All to pending from client": ClickUp's API can't move a list between folders,
+    // so GAC Desk stops treating it as a current project — it leaves the current list, its tasks stop
+    // being tracked and timed. The list itself stays where it is in ClickUp; we say so plainly.
+    if (cmd.intent === "project" && cmd.project_move?.project && cmd.project_move.folder) {
+      try {
+        const plan = await planProjectMove(cmd.project_move.project, cmd.project_move.folder);
+        return NextResponse.json({ intent: "project", move: plan });
+      } catch (e) {
+        return NextResponse.json({ intent: "answer", answer: e instanceof Error ? e.message : "Couldn't work out that move" });
+      }
+    }
+
     let warning: string | null = null;
     if (cmd.intent === "task" && cmd.task?.project) {
       const p = b.projectInfo.find((x) => x.name.toLowerCase() === cmd.task!.project!.toLowerCase());
