@@ -230,8 +230,8 @@ function Inbox() {
   }, [c?.id, stale, showContext]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="mx-auto max-w-[1240px] md:px-6 md:py-6">
-      <div className="card grid h-[calc(100dvh-120px-env(safe-area-inset-bottom))] grid-cols-1 overflow-hidden max-md:!rounded-none max-md:!border-0 md:h-[calc(100vh/var(--ui-zoom)-104px)] md:min-h-[560px] md:grid-cols-[280px_minmax(0,1fr)] lg:grid-cols-[320px_minmax(0,1fr)]">
+    <div className="mx-auto w-full md:px-6 md:py-6 xl:px-10">
+      <div className="card grid h-[calc(100dvh-120px-env(safe-area-inset-bottom))] grid-cols-1 overflow-hidden max-md:!rounded-none max-md:!border-0 md:h-[calc(100vh/var(--ui-zoom)-104px)] md:min-h-[560px] md:grid-cols-[280px_minmax(0,1fr)] lg:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[400px_minmax(0,1fr)]">
         {/* List */}
         <div className={`min-h-0 flex-col border-r border-[var(--line)] ${chosen ? "hidden md:flex" : "flex"}`}>
           <div className="space-y-2.5 p-4">

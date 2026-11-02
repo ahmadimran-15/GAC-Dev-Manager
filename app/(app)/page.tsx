@@ -51,7 +51,7 @@ export default function Overview() {
   const oldest = waiting[0];
 
   return (
-    <div className="fade-in mx-auto max-w-[1240px] px-4 pb-20 pt-6 md:px-6 md:pt-10">
+    <div className="fade-in mx-auto w-full px-4 pb-20 pt-6 md:px-6 md:pt-10 xl:px-10">
       <div className="eyebrow">{date || " "}</div>
       <h1 className="mt-1 text-[24px] font-semibold leading-tight tracking-tight md:text-[30px]">
         {waiting.length ? `${waiting.length} client${waiting.length > 1 ? "s are" : " is"} waiting for you.` : "You're all caught up."}
@@ -69,14 +69,14 @@ export default function Overview() {
         <Stat label="Team drafts" value={state.drafts.length} hint="waiting for your approval" />
       </div>
 
-      <div className="mt-10 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="mt-10 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(340px,28%)]">
         <Section title="Waiting for you" count={waiting.length} right={<Link href="/inbox" className="text-[13px] text-[var(--ink-2)] hover:text-[var(--ink)]">Open inbox →</Link>}>
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 items-start gap-3 min-[1800px]:grid-cols-2">
             {waiting.map((c) => (
               <WaitingCard key={c.id} c={c} now={now} />
             ))}
             {!waiting.length && (
-              <div className="card flex flex-col items-center py-14 text-center text-[var(--muted)]">
+              <div className="card flex flex-col items-center py-14 text-center text-[var(--muted)] min-[1800px]:col-span-2">
                 <CheckCheck size={26} className="mb-2 text-[var(--green)]" />
                 Every client has an answer.
               </div>

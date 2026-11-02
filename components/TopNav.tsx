@@ -25,7 +25,7 @@ export default function TopNav() {
   return (
     <>
       <header className="sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--bg)]/85 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-[1240px] items-center gap-3 px-4 md:gap-6 md:px-6">
+        <div className="flex h-14 w-full items-center gap-3 px-4 md:gap-6 md:px-6 xl:px-10">
           <Link href="/" className="flex shrink-0 items-center gap-2">
             <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#171717] text-[13px] font-bold text-white">G</span>
             <span className="hidden font-semibold tracking-tight sm:inline">GAC Desk</span>

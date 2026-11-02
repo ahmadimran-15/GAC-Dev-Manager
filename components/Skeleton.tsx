@@ -42,7 +42,7 @@ function CardSkel() {
 
 export function OverviewSkeleton() {
   return (
-    <div className="mx-auto max-w-[1240px] px-4 pb-20 pt-6 md:px-6 md:pt-10">
+    <div className="mx-auto w-full px-4 pb-20 pt-6 md:px-6 md:pt-10 xl:px-10">
       <S w={130} h={11} />
       <S w={420} h={30} className="mt-3" />
       <S w={360} h={14} className="mt-3" />
@@ -55,7 +55,7 @@ export function OverviewSkeleton() {
           </div>
         ))}
       </div>
-      <div className="mt-10 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="mt-10 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(340px,28%)]">
         <div className="space-y-3">
           <S w={130} h={13} className="mb-4" />
           <CardSkel />
