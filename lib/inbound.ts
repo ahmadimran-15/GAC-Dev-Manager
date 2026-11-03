@@ -158,14 +158,12 @@ export async function storeWhatsApp(inc: Incoming, live: boolean) {
   if (!live || teammate) return { stored: id };
 
   if (inc.kind === "voice") {
-    // Download and transcribe in the background; the webhook must answer quickly
+    // Keep the audio so it can be played in the thread, but don't transcribe: that happens only when
+    // you press Transcribe on the voice note, so a day of voice notes costs the server nothing.
     (async () => {
       try {
         const audio = await downloadMedia(inc);
-        if (audio) {
-          await updateMessage(id, { media_path: audio.file, media_mime: audio.mime });
-          if (transcriptionConfigured()) await updateMessage(id, { transcript: await transcribe(audio.buf, audio.mime) });
-        }
+        if (audio) await updateMessage(id, { media_path: audio.file, media_mime: audio.mime });
       } catch (e) {
         log("voice-error", { id, error: String(e) });
       }

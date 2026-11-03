@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { EMAIL_PRESETS, addAccount, deleteAccount, getAccount, listAccounts, setAccountStatus, updateAccount } from "@/lib/accounts";
+import { EMAIL_PRESETS, addAccount, deleteAccount, getAccount, listAccounts, setAccountAudience, setAccountStatus, updateAccount } from "@/lib/accounts";
 import { testMailbox } from "@/lib/email";
 import { listSessions, registerWebhook, sessionStatus } from "@/lib/whatsapp";
 
@@ -52,6 +52,8 @@ export async function POST(req: Request) {
       }
       case "update":
         await updateAccount(b.id, { label: b.label, enabled: b.enabled, canSend: b.canSend });
+        // Which side of the inbox this number or mailbox belongs to: your clients, or your own team
+        if (b.audience === "client" || b.audience === "team") await setAccountAudience(b.id, b.audience);
         return NextResponse.json({ ok: true });
       case "edit-email": {
         // Change a mailbox in place; an empty password keeps the saved one. Saved only if it can sign in (or force).

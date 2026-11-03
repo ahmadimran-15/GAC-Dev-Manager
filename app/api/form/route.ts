@@ -49,13 +49,14 @@ export async function POST(req: Request) {
   try {
     // The task's own thread, so approving it posts the comment on that task in ClickUp
     const conv = await taskConversation(task.id, { title: task.title, project: task.project, url: task.url ?? "" });
-    // The name comes from the login, not a text box, so the comment on the task is trustworthy
+    // The name comes from the login, not a text box, so the comment on the task is trustworthy.
+    // It opens with "Update of Task" so anyone reading the task sees at a glance where it came from.
     await addDraft({
       conv_id: conv.id,
       project: task.project,
       author: me.name,
       author_id: me.id,
-      text: `${me.name} said:\n\n${text.slice(0, MAX_TEXT)}`,
+      text: `Update of Task\n${me.name} · ${task.title}\n\n${text.slice(0, MAX_TEXT)}`,
     });
     return NextResponse.json({ ok: true, task: task.title, project: task.project });
   } catch (e) {

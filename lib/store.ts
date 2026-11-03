@@ -55,6 +55,7 @@ export interface ConvSummary {
   suggestion: string | null;
   remindAfter: number | null;
   internal: boolean;
+  audience: "client" | "team"; // which side of the inbox: the account it arrived on decides
   repliedBy: { name: string; at: number } | null; // last reply came from a teammate, not you
   context: string | null;
   contextAt: number | null;
@@ -109,6 +110,8 @@ export function getMessages(convId: string) {
   return all<Message>("select * from messages where conv_id = ? order by created_at", convId);
 }
 
+export const getMessage = (id: string) => get<Message>("select * from messages where id = ?", id);
+
 export async function updateMessage(id: string, fields: Partial<Message>) {
   const keys = Object.keys(fields);
   if (!keys.length) return;
@@ -137,6 +140,8 @@ from x`;
 
 async function summaries(where = "", ...p: unknown[]): Promise<ConvSummary[]> {
   const rows = await all<Conversation & { lo_ack: number | null; lo_t: number | null; lo_by: string | null; pend_t: number | null; pend_n: number; last_id: string | null }>(SUMMARY_SQL(where), ...p);
+  const { teamAccountKeys } = await import("@/lib/accounts");
+  const teamKeys = await teamAccountKeys().catch(() => new Set<string>());
   const ids = rows.map((r) => r.last_id).filter(Boolean) as string[];
   const lasts = ids.length ? await all<Message>(`select * from messages where id in (${ids.map(() => "?").join(",")})`, ...ids) : [];
   const byId = new Map(lasts.map((m) => [m.id, m]));
@@ -162,6 +167,8 @@ async function summaries(where = "", ...p: unknown[]): Promise<ConvSummary[]> {
       suggestion: waiting ? c.suggestion : null,
       remindAfter: c.remind_after === null || c.remind_after === undefined ? null : Number(c.remind_after),
       internal: !!c.internal,
+      // Arrived on one of your team accounts, or it's a ClickUp task thread: the Team side of the inbox
+      audience: c.channel === "clickup" || teamKeys.has(String(c.account ?? "").toLowerCase()) ? "team" : "client",
       repliedBy: !waiting && byTeammate && c.lo_t ? { name: byTeammate, at: Number(c.lo_t) } : null,
       context: c.context ?? null,
       contextAt: c.context_at ? Number(c.context_at) : null,

@@ -51,6 +51,16 @@ function Row({ a, onChange, presets }: { a: AccountLite; onChange: () => void; p
           <StatusLine a={a} />
         </div>
       </div>
+      {/* Which inbox its chats land in, and how replies are written: to clients, or to your own team */}
+      <select
+        className="input !h-7 !w-auto shrink-0 !py-0 !text-[12.5px]"
+        title="Clients: chats go to the Clients inbox and replies are written for clients. My team: chats go to the My team inbox and replies are written as instructions to your team."
+        value={a.config?.audience === "team" ? "team" : "client"}
+        onChange={(e) => set({ action: "update", audience: e.target.value }, e.target.value === "team" ? "Moved to your team's inbox" : "Moved to the clients inbox")}
+      >
+        <option value="client">Clients</option>
+        <option value="team">My team</option>
+      </select>
       <label className="flex shrink-0 items-center gap-1.5 text-[12.5px] text-[var(--ink-2)]" title="Show this account in the From list when replying">
         <input type="checkbox" className="accent-[#171717]" checked={a.canSend} onChange={(e) => set({ action: "update", canSend: e.target.checked })} />
         Reply from

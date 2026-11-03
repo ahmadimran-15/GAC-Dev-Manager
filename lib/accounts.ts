@@ -14,6 +14,9 @@ export interface AccountConfig {
   username?: string;
   baseUrl?: string;
   sessionId?: string;
+  // Which side of the inbox this account belongs to. "team" = your own number or mailbox that the team
+  // writes to; its chats go to the Team tab and replies are written manager-to-team, not client-service.
+  audience?: "client" | "team";
 }
 
 export interface Account {
@@ -120,6 +123,28 @@ export async function updateAccount(id: string, f: { label?: string; enabled?: b
 }
 
 export const deleteAccount = (id: string) => run("delete from accounts where id = ?", id);
+
+// ---------- Client side / team side ----------
+// A conversation stores the account it arrived on: the account id for WhatsApp, the address for email.
+// These are the keys of every account marked as the team's, so a conversation can be placed on the
+// right side of the inbox with one lookup.
+export const accountAudience = (a: Account) => a.config.audience ?? "client";
+
+export async function teamAccountKeys(): Promise<Set<string>> {
+  const keys = new Set<string>();
+  for (const a of await listAccounts()) {
+    if (accountAudience(a) !== "team") continue;
+    keys.add(a.id.toLowerCase());
+    if (a.address) keys.add(a.address.toLowerCase());
+  }
+  return keys;
+}
+
+export async function setAccountAudience(id: string, audience: "client" | "team") {
+  const a = await getAccount(id);
+  if (!a) throw new Error("Account not found");
+  await updateAccount(id, { config: { ...a.config, audience } });
+}
 
 // WhatsApp numbers imported from .env start with the session id; swap in the real phone number once known
 export const setAccountAddress = (id: string, address: string) => run("update accounts set address = ? where id = ?", address, id);

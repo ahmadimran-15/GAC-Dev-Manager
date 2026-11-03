@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Check, CheckCheck, ChevronDown, ChevronUp, ExternalLink, ListPlus, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, ChevronDown, ChevronUp, ExternalLink, ListPlus, Loader2, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
 import Composer from "@/components/Composer";
 import MessageText, { plainText } from "@/components/MessageText";
 import type { ConvSummary, Message } from "@/lib/store";
@@ -25,6 +25,41 @@ interface Detail {
 
 const REMIND = [null, 5, 15, 30, 60] as const;
 
+// A voice note is never transcribed on its own: press this and only this one is fetched and read.
+function Transcribe({ id, dark, onDone }: { id: string; dark: boolean; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (err)
+    return (
+      <span className={`text-[13px] ${dark ? "text-white/70" : "text-[var(--red)]"}`}>
+        {err}{" "}
+        <button className="underline underline-offset-2" onClick={() => setErr("")}>
+          try again
+        </button>
+      </span>
+    );
+  return (
+    <button
+      className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12.5px] transition ${dark ? "bg-white/15 text-white hover:bg-white/25" : "bg-white text-[var(--ink-2)] hover:text-[var(--ink)]"} disabled:opacity-60`}
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await api(`/api/messages/${id}/transcribe`, {});
+          onDone();
+        } catch (e) {
+          setErr(e instanceof Error ? e.message : "Couldn't transcribe it");
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+      {busy ? "Reading the voice note…" : "Transcribe"}
+    </button>
+  );
+}
+
 
 const dayLabel = (t: number) => {
   const d = new Date(t);
@@ -36,7 +71,10 @@ const dayLabel = (t: number) => {
 };
 const time = (t: number) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
-function Inbox() {
+// side = which inbox this is: the company's client accounts, or the accounts marked as your team's.
+// Every link inside keeps the side in the URL, so opening a chat doesn't drop you back to Clients.
+function Inbox({ side }: { side: "client" | "team" }) {
+  const sideUrl = (convId?: string) => `/inbox?${[side === "team" ? "tab=myteam" : "", convId ? `c=${convId}` : ""].filter(Boolean).join("&")}`;
   const params = useSearchParams();
   const router = useRouter();
   const { state, refresh, send, toast } = useLive();
@@ -90,6 +128,8 @@ function Inbox() {
   const endRef = useRef<HTMLDivElement>(null);
 
   const isGroup = (c: ConvSummary) => c.channel === "whatsapp" && c.externalId.endsWith("@g.us");
+  // "Waiting" means a person is waiting on you. A ClickUp task thread is our own work, counted separately.
+  const needsReply = (c: ConvSummary) => c.waiting && c.channel !== "clickup";
   // "whatsapp", "groups", "email", "team", or one mailbox / number (an account key)
   const inChannel = (c: ConvSummary) =>
     channel === "all" ||
@@ -105,16 +145,18 @@ function Inbox() {
   const convs = (state?.conversations ?? [])
     .filter(
       (c) =>
-        (filter === "all" || c.waiting) &&
+        c.audience === side &&
+        (filter === "all" || needsReply(c)) &&
         inChannel(c) &&
         (!proj || c.project === proj) &&
         (!q || `${c.name} ${c.company ?? ""} ${c.project ?? ""} ${c.externalId}`.toLowerCase().includes(q.toLowerCase())),
     )
     // Newest first: the chat that spoke last sits at the top
     .sort((a, b) => (b.last?.at ?? 0) - (a.last?.at ?? 0));
-  const projects = [...new Set((state?.conversations ?? []).map((c) => c.project).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b));
+  const sideConvs = (state?.conversations ?? []).filter((c) => c.audience === side);
+  const projects = [...new Set(sideConvs.map((c) => c.project).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b));
   const mailboxes = (state?.accounts ?? []).filter((a) => a.kind === "email");
-  const id = params.get("c") ?? state?.conversations[0]?.id ?? null;
+  const id = params.get("c") ?? convs[0]?.id ?? null;
   // Phone: one pane at a time, the list until a chat is tapped, then the chat with a back arrow
   const chosen = !!params.get("c");
   const now = state?.now ?? Date.now();
@@ -207,8 +249,12 @@ function Inbox() {
   function startTask() {
     if (!detail) return;
     if (!selecting) {
+      // In a one-to-one chat the messages since your last reply are the obvious unit, so they start ticked.
+      // In a group (or a long run with no reply of ours) that would tick the whole thread, so nothing starts
+      // ticked and you pick what belongs in the task.
       const lastOut = [...detail.messages].reverse().find((m) => m.direction === "out")?.created_at ?? 0;
-      setSel(new Set(detail.messages.filter((m) => m.direction === "in" && m.created_at > lastOut).map((m) => m.id)));
+      const since = detail.messages.filter((m) => m.direction === "in" && m.created_at > lastOut);
+      setSel(new Set(isGroup(c!) || since.length > 5 ? [] : since.map((m) => m.id)));
       setSelecting(true);
     } else if (sel.size) setDrawer(true);
   }
@@ -255,7 +301,7 @@ function Inbox() {
               {(["all", "waiting"] as const).map((f) => (
                 <button key={f} onClick={() => setFilter(f)} className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-[12.5px] ${filter === f ? "bg-[#171717] text-white" : "text-[var(--ink-2)] hover:bg-[var(--hover)]"}`}>
                   {f === "all" ? "All" : "Waiting"}
-                  <span className={`tnum ml-1 ${filter === f ? "text-white/70" : "text-[var(--muted)]"}`}>{f === "all" ? (state?.conversations.length ?? 0) : (state?.stats.waiting ?? 0)}</span>
+                  <span className={`tnum ml-1 ${filter === f ? "text-white/70" : "text-[var(--muted)]"}`}>{f === "all" ? sideConvs.length : sideConvs.filter(needsReply).length}</span>
                 </button>
               ))}
               {(proj || channel !== "all") && (
@@ -275,7 +321,7 @@ function Inbox() {
                 block
                 value={proj}
                 onChange={setProj}
-                options={[{ value: "", label: "All projects" }, ...projects.map((p) => ({ value: p, label: p, hint: `${(state?.conversations ?? []).filter((c) => c.project === p).length}` }))]}
+                options={[{ value: "", label: "All projects" }, ...projects.map((p) => ({ value: p, label: p, hint: `${sideConvs.filter((c) => c.project === p).length}` }))]}
               />
               <Dropdown
                 block
@@ -301,7 +347,7 @@ function Inbox() {
               return (
               <button
                 key={x.id}
-                onClick={() => router.replace(`/inbox?c=${x.id}`)}
+                onClick={() => router.replace(sideUrl(x.id))}
                 className={`relative flex w-full gap-3 rounded-xl px-3 py-2.5 text-left transition ${
                   open ? "bg-white shadow-[0_0_0_1px_var(--line-2),0_2px_8px_-4px_rgba(0,0,0,0.12)]" : "hover:bg-[var(--bg)]/70"
                 }`}
@@ -347,7 +393,7 @@ function Inbox() {
             <div className="space-y-2.5 border-b border-[var(--line)] px-4 py-3 md:px-6 md:py-3.5">
               {/* Who + actions */}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <button className="btn btn-ghost !h-9 !w-9 shrink-0 !p-0 md:hidden" title="All chats" onClick={() => router.replace("/inbox")}>
+                <button className="btn btn-ghost !h-9 !w-9 shrink-0 !p-0 md:hidden" title="All chats" onClick={() => router.replace(sideUrl())}>
                   <ArrowLeft size={18} />
                 </button>
                 <Avatar name={c.name} size={38} />
@@ -457,9 +503,15 @@ function Inbox() {
             )}
 
             {selecting && (
-              <div className="flex items-center justify-between bg-[var(--bg)] px-4 py-2 text-[13px] md:px-6 text-[var(--ink-2)]">
-                Tick the messages that belong in this task.
-                <button className="btn btn-ghost btn-sm" onClick={() => (setSelecting(false), setSel(new Set()))}>
+              <div className="flex flex-wrap items-center gap-2 bg-[var(--bg)] px-4 py-2 text-[13px] text-[var(--ink-2)] md:px-6">
+                <span className="min-w-0 flex-1">Tick the messages that belong in this task. {sel.size > 0 && <b className="font-semibold text-[var(--ink)]">{sel.size} ticked</b>}</span>
+                <button
+                  className="shrink-0 text-[12.5px] hover:text-[var(--ink)]"
+                  onClick={() => setSel(sel.size ? new Set() : new Set(detail.messages.filter((m) => m.direction === "in").map((m) => m.id)))}
+                >
+                  {sel.size ? "Clear" : "Tick all from them"}
+                </button>
+                <button className="btn btn-ghost btn-sm shrink-0" onClick={() => (setSelecting(false), setSel(new Set()))}>
                   <X size={13} /> Cancel
                 </button>
               </div>
@@ -509,7 +561,7 @@ function Inbox() {
                             </div>
                           )}
                           {m.kind === "voice" && m.media_path && <audio controls src={`/api/media/${m.media_path}`} className="mb-2 h-9 w-64 max-w-full" />}
-                          {body ? <MessageText text={body} dark={mine && !m.ack} /> : (m.kind === "voice" ? <span className="italic text-[var(--muted)]">{state?.connections.transcription ? "Transcribing…" : "Add GOOGLE_AI_API_KEY to transcribe voice notes"}</span> : null)}
+                          {body ? <MessageText text={body} dark={mine && !m.ack} /> : m.kind === "voice" ? <Transcribe id={m.id} dark={mine && !m.ack} onDone={load} /> : null}
                         </div>
                         <div className="mt-1 px-1 text-[11px] text-[var(--muted)]">
                           {mine && m.ack ? "Acknowledged · " : ""}
@@ -603,26 +655,37 @@ function Inbox() {
   );
 }
 
-// Sub-tabs: client chats, and the updates your team wrote for you to approve and send
+// Two inboxes and the approvals queue: client chats (the company's client numbers and mailboxes),
+// your team's chats (the accounts you marked as the team's, in Settings), and updates to approve.
 function InboxTabs() {
   const params = useSearchParams();
   const router = useRouter();
   const { state } = useLive();
-  const team = params.get("tab") === "team";
+  // A link from elsewhere (Overview, a task's Reply button) only carries ?c=…, so the chat itself says
+  // which side to open: a team chat opens the My team inbox, not Clients.
+  const openId = params.get("c");
+  const openSide = openId ? (state?.conversations ?? []).find((c) => c.id === openId)?.audience : undefined;
+  const which = params.get("tab") ?? (openSide === "team" ? "myteam" : "");
   const tab = (on: boolean) => `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13.5px] transition ${on ? "bg-white font-medium text-[var(--ink)] shadow-[0_0_0_1px_var(--line)]" : "text-[var(--ink-2)] hover:text-[var(--ink)]"}`;
+  const dot = (n: number, tone: string) => n > 0 && <span className={`tnum rounded-full px-1.5 text-[10.5px] font-semibold text-white ${tone}`}>{n}</span>;
+  const teamChats = (state?.conversations ?? []).filter((c) => c.audience === "team").length;
   return (
     <div className="mx-auto w-full md:px-6 md:pt-4 xl:px-10">
-      <div className="flex items-center gap-1 px-4 py-2 md:mb-3 md:px-0 md:py-0">
-        <button className={tab(!team)} onClick={() => router.replace("/inbox")}>
-          Chats
-          {(state?.stats.waiting ?? 0) > 0 && <span className="tnum rounded-full bg-[var(--red)] px-1.5 text-[10.5px] font-semibold text-white">{state!.stats.waiting}</span>}
+      <div className="flex flex-wrap items-center gap-1 px-4 py-2 md:mb-3 md:px-0 md:py-0">
+        <button className={tab(which === "")} onClick={() => router.replace("/inbox")}>
+          Clients
+          {dot(state?.stats.waiting ?? 0, "bg-[var(--red)]")}
         </button>
-        <button className={tab(team)} onClick={() => router.replace("/inbox?tab=team")}>
+        <button className={tab(which === "myteam")} onClick={() => router.replace("/inbox?tab=myteam")} title="Chats on the number or mailbox you marked as your team's">
+          My team
+          {dot(state?.stats.teamWaiting ?? 0, "bg-[var(--red)]") || (teamChats > 0 && <span className="tnum text-[11px] text-[var(--muted)]">{teamChats}</span>)}
+        </button>
+        <button className={tab(which === "team")} onClick={() => router.replace("/inbox?tab=team")}>
           Team updates
-          {(state?.drafts.length ?? 0) > 0 && <span className="tnum rounded-full bg-[var(--amber)] px-1.5 text-[10.5px] font-semibold text-white">{state!.drafts.length}</span>}
+          {dot(state?.drafts.length ?? 0, "bg-[var(--amber)]")}
         </button>
       </div>
-      {team ? <TeamUpdates /> : <Inbox />}
+      {which === "team" ? <TeamUpdates /> : <Inbox side={which === "myteam" ? "team" : "client"} />}
     </div>
   );
 }

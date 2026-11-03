@@ -437,19 +437,46 @@ export const accountForSession = async (sessionId: string | null) => {
 };
 
 // Voice notes: the gateway stores the media; fetch the bytes and keep a local copy for playback.
-export async function downloadMedia(inc: Incoming): Promise<{ file: string; mime: string; buf: Buffer } | null> {
+export async function downloadMedia(inc: Incoming) {
   const a = await accountForSession(inc.sessionId);
-  if (!a) return null;
+  return a ? fetchMedia(a, inc.chatId, inc.id) : null;
+}
+
+// The same download for a message already in the inbox, from what we stored about it. Used by the
+// Transcribe button, so a voice note is only ever fetched when you actually ask for it.
+export async function downloadStoredMedia(account: string, chatId: string, messageId: string) {
+  const list = await waAccounts();
+  const a = list.find((x) => x.id === account || x.config.sessionId === account) ?? list[0];
+  return a ? fetchMedia(a, chatId, messageId) : null;
+}
+
+// The gateway sends the file back with an audio content-type but, on this version, the body is its
+// NestJS StreamableFile serialised to JSON, with the real bytes inside stream._readableState.buffer.
+// Anything that already looks like a file is passed straight through.
+function unwrap(buf: Buffer): Buffer {
+  if (buf[0] !== 0x7b) return buf; // not "{": already the file itself
+  try {
+    const o = JSON.parse(buf.toString("utf8")) as { stream?: { _readableState?: { buffer?: ({ data?: number[] } | number[])[] } }; data?: number[] };
+    const chunks = o.stream?._readableState?.buffer;
+    if (Array.isArray(chunks) && chunks.length) return Buffer.concat(chunks.map((c) => Buffer.from(Array.isArray(c) ? c : (c.data ?? []))));
+    if (Array.isArray(o.data)) return Buffer.from(o.data);
+  } catch {
+    /* not JSON after all: use it as it came */
+  }
+  return buf;
+}
+
+async function fetchMedia(a: AccountWithSecret, chatId: string, messageId: string): Promise<{ file: string; mime: string; buf: Buffer } | null> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(`${base(a)}/api/sessions/${a.config.sessionId}/messages/${encodeURIComponent(inc.chatId)}/${encodeURIComponent(inc.id)}/media`, {
+    const res = await fetch(`${base(a)}/api/sessions/${a.config.sessionId}/messages/${encodeURIComponent(chatId)}/${encodeURIComponent(messageId)}/media`, {
       headers: { "x-api-key": a.secret },
       signal: AbortSignal.timeout(60_000),
     });
     if (res.ok) {
-      const buf = Buffer.from(await res.arrayBuffer());
+      const buf = unwrap(Buffer.from(await res.arrayBuffer()));
       const mime = (res.headers.get("content-type") ?? "audio/ogg").split(";")[0];
       const ext = mime.includes("mpeg") ? "mp3" : mime.includes("mp4") || mime.includes("m4a") ? "m4a" : mime.includes("wav") ? "wav" : "ogg";
-      const file = `${inc.id.replace(/[^\w-]/g, "").slice(-60)}.${ext}`;
+      const file = `${messageId.replace(/[^\w-]/g, "").slice(-60)}.${ext}`;
       fs.writeFileSync(path.join(MEDIA_DIR, file), buf);
       return { file, mime: mime === "application/octet-stream" ? "audio/ogg" : mime, buf };
     }

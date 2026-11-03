@@ -52,7 +52,9 @@ export async function GET() {
       drafts,
       accounts,
       stats: {
-        waiting: conversations.filter((c) => c.waiting && c.channel !== "clickup").length,
+        // Clients waiting on you, and your own team waiting on you: the inbox's two sides
+        waiting: conversations.filter((c) => c.waiting && c.audience === "client").length,
+        teamWaiting: conversations.filter((c) => c.waiting && c.audience === "team" && c.channel !== "clickup").length,
         tasks: conversations.filter((c) => c.channel === "clickup" && c.waiting).length,
         firstReplyAvg: reply.avg,
         repliesToday: reply.count,

@@ -22,6 +22,7 @@ export interface AccountLite {
   enabled: boolean;
   canSend: boolean;
   status: { ok: boolean; at: number; error?: string } | null;
+  config?: { audience?: "client" | "team"; [k: string]: unknown };
 }
 
 // The account a conversation came in on (email address or WhatsApp account id)
@@ -34,7 +35,7 @@ export interface LiveState {
   health: { at: number; problems: string[] } | null;
   conversations: ConvSummary[];
   drafts: DraftRow[];
-  stats: { waiting: number; tasks?: number; firstReplyAvg: number | null; repliesToday: number };
+  stats: { waiting: number; teamWaiting?: number; tasks?: number; firstReplyAvg: number | null; repliesToday: number };
   accounts: AccountLite[];
   connections: {
     gemini: boolean;
