@@ -56,6 +56,7 @@ export interface ConvSummary {
   remindAfter: number | null;
   internal: boolean;
   audience: "client" | "team"; // which side of the inbox: the account it arrived on decides
+  shiftWatch: boolean; // SOD / EOD screenshots are checked in this chat
   repliedBy: { name: string; at: number } | null; // last reply came from a teammate, not you
   context: string | null;
   contextAt: number | null;
@@ -142,6 +143,8 @@ async function summaries(where = "", ...p: unknown[]): Promise<ConvSummary[]> {
   const rows = await all<Conversation & { lo_ack: number | null; lo_t: number | null; lo_by: string | null; pend_t: number | null; pend_n: number; last_id: string | null }>(SUMMARY_SQL(where), ...p);
   const { teamAccountKeys } = await import("@/lib/accounts");
   const teamKeys = await teamAccountKeys().catch(() => new Set<string>());
+  const { shiftCheckChats, matchesWatch } = await import("@/lib/shiftcheck");
+  const watched = await shiftCheckChats().catch(() => [] as string[]);
   const ids = rows.map((r) => r.last_id).filter(Boolean) as string[];
   const lasts = ids.length ? await all<Message>(`select * from messages where id in (${ids.map(() => "?").join(",")})`, ...ids) : [];
   const byId = new Map(lasts.map((m) => [m.id, m]));
@@ -169,6 +172,8 @@ async function summaries(where = "", ...p: unknown[]): Promise<ConvSummary[]> {
       internal: !!c.internal,
       // Arrived on one of your team accounts, or it's a ClickUp task thread: the Team side of the inbox
       audience: c.channel === "clickup" || teamKeys.has(String(c.account ?? "").toLowerCase()) ? "team" : "client",
+      // Shift screenshots (SOD / EOD) are watched for in this chat, so it gets the Check button
+      shiftWatch: c.channel === "whatsapp" && matchesWatch(watched, c),
       repliedBy: !waiting && byTeammate && c.lo_t ? { name: byTeammate, at: Number(c.lo_t) } : null,
       context: c.context ?? null,
       contextAt: c.context_at ? Number(c.context_at) : null,

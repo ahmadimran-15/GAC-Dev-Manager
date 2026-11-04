@@ -329,6 +329,27 @@ function garbled(text: string) {
   return words.length > 12 && new Set(words).size <= words.length / 6;
 }
 
+// Reads a picture and answers the question asked about it, on the same endpoint the audio uses.
+export async function readImage(image: Buffer, mime: string, prompt: string): Promise<string> {
+  if (!geminiAudioConfigured()) throw new Error("No Gemini server is configured, so pictures can't be read.");
+  const base = String(process.env.GEMINI_BASE_URL).replace(/\/+$/, "").replace(/\/v1$/, "");
+  const res = await fetch(`${base}/v1beta/models/${process.env.GEMINI_MODEL || "gemini-2.5-flash"}:generateContent`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${process.env.GEMINI_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType: mime.split(";")[0] || "image/jpeg", data: image.toString("base64") } }] }],
+    }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error?.message ?? `Reading the picture failed (${res.status})`);
+  const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "").replace(/\[cite[^\]]*\]/gi, "").trim();
+  // Same tell as the audio path: the picture never got through, so the model answers about nothing.
+  if (!text || /unable to generate a response|forgot to attach|no image (?:was )?(?:attached|provided)/i.test(text))
+    throw new Error("The Gemini server took the picture but sent nothing back — reconnect its Google session.");
+  return text;
+}
+
 export async function transcribe(audio: Buffer, mime: string): Promise<string | null> {
   // Gemini reads Urdu and Hindi properly, so it goes first whenever it is configured. Local Whisper is
   // the fallback: free and offline, but the small model garbles anything that isn't English.

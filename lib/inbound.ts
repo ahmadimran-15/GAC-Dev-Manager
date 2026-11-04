@@ -21,7 +21,7 @@ import { teamMember } from "@/lib/team-numbers";
 import { pollAll, sendEmail } from "@/lib/email";
 import { defaultSender, getAccount, listAccounts } from "@/lib/accounts";
 import { trackGroup, trackedGroups } from "@/lib/groups";
-import { addMessage, findOrCreateConversation, getConversation, getMessages, listConversations, updateConversation, updateMessage, type ConvSummary } from "@/lib/store";
+import { addMessage, findOrCreateConversation, getConversation, getMessages, listConversations, updateConversation, updateMessage, type Conversation, type ConvSummary } from "@/lib/store";
 
 const log = (source: string, payload: unknown) => logEvent(source, payload).catch(() => {});
 
@@ -134,6 +134,9 @@ export async function storeWhatsApp(inc: Incoming, live: boolean) {
     });
     if (id && ours && live) await updateConversation(conv.id, { suggestion: null, suggestion_for: null, reminded_at: null });
     if (id && live) {
+      // A watched chat exists for the shift screenshots, so whoever posts one gets it checked —
+      // teammates and your own phone included, whose messages are otherwise filed as ours.
+      shiftCheck(conv, id, inc);
       if (teammate) afterTeammateReply(conv.id);
       else if (!ours) afterIncoming(conv.id);
     }
@@ -147,6 +150,7 @@ export async function storeWhatsApp(inc: Incoming, live: boolean) {
     if (recent.some((m) => m.direction === "out" && m.text === inc.text && Math.abs(Number(m.created_at) - inc.at) < 120_000)) return { duplicate: true };
     const id = await addMessage({ conv_id: conv.id, direction: "out", kind: inc.kind, text: inc.text || null, external_id: inc.id, sent_by: "phone", status: "sent", created_at: inc.at, via: acc?.label });
     if (id && live) await updateConversation(conv.id, { suggestion: null, suggestion_for: null });
+    if (id && live) shiftCheck(conv, id, inc); // a screenshot you posted yourself in a watched chat counts too
     return { recorded: "outgoing", stored: id };
   }
 
@@ -155,7 +159,12 @@ export async function storeWhatsApp(inc: Incoming, live: boolean) {
   if (teammate && !conv.internal) await updateConversation(conv.id, { internal: 1 });
   const id = await addMessage({ conv_id: conv.id, direction: "in", kind: inc.kind, text: inc.kind === "voice" ? null : inc.text || null, external_id: inc.id, created_at: inc.at, via: acc?.label });
   if (!id) return { duplicate: true };
-  if (!live || teammate) return { stored: id };
+  if (!live) return { stored: id };
+  // A teammate's direct chat is otherwise left alone, but a shift screenshot in a watched one still counts
+  if (teammate) {
+    shiftCheck(conv, id, inc);
+    return { stored: id };
+  }
 
   if (inc.kind === "voice") {
     // Keep the audio so it can be played in the thread, but don't transcribe: that happens only when
@@ -169,9 +178,30 @@ export async function storeWhatsApp(inc: Incoming, live: boolean) {
       }
       afterIncoming(conv.id);
     })();
-  } else afterIncoming(conv.id);
+  } else {
+    shiftCheck(conv, id, inc);
+    afterIncoming(conv.id);
+  }
 
   return { stored: id };
+}
+
+// A picture in a watched chat is read as shift proof (SOD / EOD) and answered there. Runs in the
+// background so the webhook still returns at once, and stays quiet unless the picture really is proof.
+function shiftCheck(conv: Conversation, messageId: string, inc: Incoming) {
+  if (inc.kind !== "image") return;
+  (async () => {
+    try {
+      const { watchesShiftCheck, checkShiftImage } = await import("@/lib/shiftcheck");
+      if (!(await watchesShiftCheck(conv))) return;
+      const img = await downloadMedia(inc);
+      if (!img) return log("shift-check-error", { message: messageId, error: "the gateway had no picture" });
+      await updateMessage(messageId, { media_path: img.file, media_mime: img.mime });
+      await checkShiftImage(conv, messageId, img.buf, img.mime, inc.at);
+    } catch (e) {
+      log("shift-check-error", { message: messageId, error: String(e) });
+    }
+  })();
 }
 
 // ---------- Sending ----------
@@ -215,14 +245,22 @@ export async function warmTagging(convId: string) {
 // Same text to the same chat while a send is running or within a minute = a double click, not a new message
 const inFlight = new Set<string>();
 
-export async function sendToConversation(convId: string, text: string, opts: { ack?: boolean; by?: string; from?: string | null; quote?: boolean } = {}) {
+export async function sendToConversation(
+  convId: string,
+  text: string,
+  // repeat: this is an automatic answer to something that really happened twice (two screenshots of the
+  // same proof), not a double click, so saying the same thing again is correct.
+  opts: { ack?: boolean; by?: string; from?: string | null; quote?: boolean; repeat?: boolean } = {},
+) {
   // "@tulaib" is stored as "@923…", so compare with mentions blanked out
   const norm = (s: string | null | undefined) => String(s ?? "").replace(/@\S+/g, "@").replace(/\s+/g, " ").trim();
   const key = `${convId}\n${norm(text)}`;
-  if (inFlight.has(key)) throw new Error("This message is already being sent.");
-  const recent = (await getMessages(convId)).slice(-5);
-  if (recent.some((m) => m.direction === "out" && norm(m.text) === norm(text) && Date.now() - Number(m.created_at) < 60_000))
-    throw new Error("You sent this exact message less than a minute ago.");
+  if (!opts.repeat) {
+    if (inFlight.has(key)) throw new Error("This message is already being sent.");
+    const recent = (await getMessages(convId)).slice(-5);
+    if (recent.some((m) => m.direction === "out" && norm(m.text) === norm(text) && Date.now() - Number(m.created_at) < 60_000))
+      throw new Error("You sent this exact message less than a minute ago.");
+  }
   inFlight.add(key);
   try {
     return await sendOnceTo(convId, text, opts);
@@ -321,7 +359,9 @@ async function pollEmail() {
 // (REMINDER_WHATSAPP_TO) and/or by email (REMINDER_EMAIL_TO, sent from the first working mailbox).
 // Each client can have its own "remind after" time; otherwise REMINDER_AFTER_MINUTES applies.
 async function sendReminders() {
-  const waTo = process.env.REMINDER_WHATSAPP_TO;
+  // The summary on WhatsApp was noise on the phone, so it only goes there with REMINDER_WHATSAPP_DIGEST=on.
+  // The number stays set: new-email alerts still reach it, and the summary still goes out by email.
+  const waTo = process.env.REMINDER_WHATSAPP_DIGEST === "on" ? process.env.REMINDER_WHATSAPP_TO : null;
   const mailTo = process.env.REMINDER_EMAIL_TO;
   const useWa = !!waTo && (await waConfigured());
   const mailFrom = mailTo ? await reminderMailbox() : null;

@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Inbox, LayoutGrid, LogOut, Mic, Settings, Sparkles, Users } from "lucide-react";
+import { Image as ImageIcon, Inbox, LayoutGrid, LogOut, Mic, Settings, Sparkles, Users } from "lucide-react";
 import { useLive } from "@/components/Live";
 import Reminders from "@/components/Reminders";
 
@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/inbox", label: "Inbox", Icon: Inbox },
   { href: "/team", label: "Team", Icon: Users },
   { href: "/assistant", label: "Assistant", Icon: Sparkles },
+  { href: "/image", label: "Image", Icon: ImageIcon },
   { href: "/settings", label: "Settings", Icon: Settings },
 ];
 

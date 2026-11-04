@@ -68,7 +68,7 @@ export async function GET() {
         whatsapp: wa.length > 0,
         whatsappLastEvent: lastWa ? Number(lastWa.created_at) : null,
         whatsappSecret: !!process.env.WA_WEBHOOK_SECRET,
-        reminderWhatsApp: !!process.env.REMINDER_WHATSAPP_TO,
+        reminderWhatsApp: !!process.env.REMINDER_WHATSAPP_TO && process.env.REMINDER_WHATSAPP_DIGEST === "on",
         reminderEmail: process.env.REMINDER_EMAIL_TO || null,
         publicUrl: process.env.PUBLIC_URL || null,
         clickup: clickupConfigured(),

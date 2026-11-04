@@ -1,0 +1,111 @@
+# Render reads this when the repository is connected, so the service is created with the right
+# settings instead of them being typed into the dashboard. No secret is written here: every key
+# marked sync:false has to be pasted into the Render dashboard once, by hand.
+services:
+  - type: web
+    name: gac-desk
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm ci && npm run build
+    # Render picks the port and passes it in; next start has to be told to use it.
+    startCommand: npx next start -p $PORT
+    healthCheckPath: /login
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # next build peaks around 1.3 GB on this app, more than Node's default heap allows.
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=2048
+
+      # Supabase (session pooler, port 5432)
+      - key: DATABASE_HOST
+        sync: false
+      - key: DATABASE_PORT
+        sync: false
+      - key: DATABASE_NAME
+        sync: false
+      - key: DATABASE_USER
+        sync: false
+      - key: DATABASE_PASSWORD
+        sync: false
+
+      # Sign-in
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: TEAM_TOKENS
+        sync: false
+
+      # WhatsApp gateway
+      - key: WA_BASE_URL
+        sync: false
+      - key: WA_API_KEY
+        sync: false
+      - key: WA_SESSION_ID
+        sync: false
+      - key: WA_WEBHOOK_SECRET
+        sync: false
+
+      # ClickUp
+      - key: CLICKUP_TOKEN
+        sync: false
+      - key: CLICKUP_TEAM_ID
+        sync: false
+
+      # Mailboxes
+      - key: EMAIL1_LABEL
+        sync: false
+      - key: EMAIL1_PROVIDER
+        sync: false
+      - key: EMAIL1_USER
+        sync: false
+      - key: EMAIL1_PASS
+        sync: false
+      - key: EMAIL2_LABEL
+        sync: false
+      - key: EMAIL2_PROVIDER
+        sync: false
+      - key: EMAIL2_USER
+        sync: false
+      - key: EMAIL2_PASS
+        sync: false
+
+      # Gemini server (voice notes and the Image tab)
+      - key: GEMINI_BASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false
+      - key: GEMINI_SESSION_ID
+        sync: false
+      - key: STT_PROVIDER
+        sync: false
+      - key: STT_LANGUAGES
+        sync: false
+      - key: STT_IDLE_MINUTES
+        sync: false
+
+      # This one is set last, to the https://<service>.onrender.com address Render gives you.
+      - key: PUBLIC_URL
+        sync: false
+
+      # Reminders: the WhatsApp summary stays off, email reminders keep working.
+      - key: REMINDER_WHATSAPP_TO
+        sync: false
+      - key: REMINDER_MINUTES
+        value: "10"
+      - key: REMINDER_AFTER_MINUTES
+        value: "5"
+      - key: REMINDER_WHATSAPP_DIGEST
+        value: "off"
+
+      # Live data only. The seed runs unless this is exactly "0", so it must be set.
+      - key: SEED_DEMO
+        value: "0"

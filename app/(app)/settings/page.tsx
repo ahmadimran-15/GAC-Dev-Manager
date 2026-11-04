@@ -136,7 +136,7 @@ export default function Settings() {
         <Row
           name="WhatsApp reminders to your phone"
           ok={!!k?.reminderWhatsApp && !!k?.whatsapp}
-          detail={k?.reminderWhatsApp ? "On. The server sends you a WhatsApp summary of waiting clients with suggested replies." : "Set REMINDER_WHATSAPP_TO (your number) and REMINDER_MINUTES in .env to get reminders on your phone too."}
+          detail={k?.reminderWhatsApp ? "On. The server sends you a WhatsApp summary of waiting clients with suggested replies." : "Off — the summary comes by email instead. Set REMINDER_WHATSAPP_DIGEST=on in .env to get it on your phone as well."}
         />
         <Row
           name="Email reminders"

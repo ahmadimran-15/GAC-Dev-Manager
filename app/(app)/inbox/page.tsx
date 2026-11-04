@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Check, CheckCheck, ChevronDown, ChevronUp, ExternalLink, ListPlus, Loader2, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, ChevronDown, ChevronUp, Clock, ExternalLink, ListPlus, Loader2, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
 import Composer from "@/components/Composer";
 import MessageText, { plainText } from "@/components/MessageText";
 import type { ConvSummary, Message } from "@/lib/store";
@@ -26,6 +26,60 @@ interface Detail {
 const REMIND = [null, 5, 15, 30, 60] as const;
 
 // A voice note is never transcribed on its own: press this and only this one is fetched and read.
+// Re-reads the day's screenshots in a watched chat and says what is there. Reports here only: the
+// automatic replies already cover the chat, so pressing this never posts anything to the team.
+function ShiftCheck({ convId }: { convId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState<{ summary: string; pictures: number; read: number; ignored: number; unreadable: number } | null>(null);
+  const [err, setErr] = useState("");
+  return (
+    <span className="relative">
+      <button
+        className="btn btn-sm"
+        disabled={busy}
+        title="Read today's screenshots again and say which SOD and EOD proof arrived"
+        onClick={async () => {
+          setBusy(true);
+          setErr("");
+          setOut(null);
+          try {
+            setOut(await api(`/api/conversations/${convId}/shift-check?hours=24`, {}));
+          } catch (e) {
+            setErr(e instanceof Error ? e.message : "The check failed");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? <Loader2 size={14} className="animate-spin" /> : <Clock size={14} />} {busy ? "Checking…" : "Check SOD/EOD"}
+      </button>
+      {(out || err) && (
+        <span className="absolute right-0 top-full z-20 mt-1.5 w-80 rounded-xl border border-[var(--line)] bg-white p-3 text-[12.5px] shadow-lg">
+          <span className="flex items-start justify-between gap-2">
+            <span className={err ? "text-[var(--red)]" : ""}>{err || out?.summary}</span>
+            <button
+              className="shrink-0 text-[var(--ink-2)] hover:text-[var(--ink)]"
+              onClick={() => {
+                setOut(null);
+                setErr("");
+              }}
+            >
+              <X size={13} />
+            </button>
+          </span>
+          {out && (
+            <span className="mt-1.5 block text-[var(--ink-2)]">
+              {out.pictures} picture{out.pictures === 1 ? "" : "s"} in the last 24 hours · {out.read} read
+              {out.ignored ? ` · ${out.ignored} not shift proof` : ""}
+              {out.unreadable ? ` · ${out.unreadable} couldn't be read` : ""}
+            </span>
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function Transcribe({ id, dark, onDone }: { id: string; dark: boolean; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -413,6 +467,7 @@ function Inbox({ side }: { side: "client" | "team" }) {
                       Open task <ExternalLink size={13} />
                     </a>
                   )}
+                  {c.shiftWatch && <ShiftCheck convId={c.id} />}
                   <button className={`btn btn-sm ${selecting ? "btn-dark" : ""}`} onClick={startTask}>
                     <ListPlus size={14} /> {selecting ? `Create task from ${sel.size}` : "Create task"}
                   </button>
