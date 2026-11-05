@@ -85,6 +85,8 @@ create table if not exists users (
   password_hash text not null,
   active integer not null default 1,
   clickup_name text,
+  can_portal integer not null default 1,
+  can_form integer not null default 1,
   last_login ${big},
   created_at ${big} not null
 );
@@ -220,6 +222,9 @@ const PG_MIGRATIONS = [
   "alter table drafts add column if not exists author_id text",
   "alter table drafts add column if not exists sent_to text",
   "alter table users add column if not exists clickup_name text",
+  // Which halves of the team side a login may open: the update form, the WhatsApp portal, or both.
+  "alter table users add column if not exists can_portal integer not null default 1",
+  "alter table users add column if not exists can_form integer not null default 1",
   "alter table conversations add column if not exists remind_after integer",
   "alter table conversations add column if not exists internal integer not null default 0",
   "alter table conversations add column if not exists context text",

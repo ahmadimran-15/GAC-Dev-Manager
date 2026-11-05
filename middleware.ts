@@ -1,12 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, SESSION_MAX_AGE, cookieOptions, createSession, isHttps, readSession } from "@/lib/session";
+import { SESSION_COOKIE, SESSION_MAX_AGE, cookieOptions, createSession, isHttps, mayOpen, readSession } from "@/lib/session";
 
 // Login required everywhere except the login page and incoming webhooks.
 // Team members only reach their portal; everything else is the owner's.
 const PUBLIC = [/^\/login/, /^\/api\/auth\//, /^\/api\/webhooks\//];
 // /form is the update form: a login the owner created in Settings → Logins, so every update carries
 // a real name. It only ever shows project and task names, never a client, a number or a chat.
-const TEAM_ALLOWED = [/^\/portal/, /^\/api\/portal/, /^\/form$/, /^\/api\/form$/];
+// Each half is switched on per login in Settings → Logins, so a teammate given only the form
+// never reaches the WhatsApp portal, and the other way round.
+const PORTAL = [/^\/portal/, /^\/api\/portal/];
+const FORM = [/^\/form$/, /^\/api\/form$/];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -21,12 +24,18 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (s.role === "team" && !TEAM_ALLOWED.some((r) => r.test(pathname))) {
-    if (pathname.startsWith("/api/")) return NextResponse.json({ error: "Not allowed" }, { status: 403 });
-    const url = req.nextUrl.clone();
-    url.pathname = "/portal";
-    url.search = "";
-    return NextResponse.redirect(url);
+  if (s.role === "team") {
+    const wants = PORTAL.some((r) => r.test(pathname)) ? "portal" : FORM.some((r) => r.test(pathname)) ? "form" : null;
+    if (!wants || !mayOpen(s, wants)) {
+      if (pathname.startsWith("/api/")) return NextResponse.json({ error: "Not allowed" }, { status: 403 });
+      const home = mayOpen(s, "portal") ? "/portal" : mayOpen(s, "form") ? "/form" : "/login";
+      // Nowhere left to send them: the owner has switched both halves off, so end the session.
+      if (home === "/login" && pathname === "/login") return NextResponse.next();
+      const url = req.nextUrl.clone();
+      url.pathname = home;
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
   }
 
   const res = NextResponse.next();

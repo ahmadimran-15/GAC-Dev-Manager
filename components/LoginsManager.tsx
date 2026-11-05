@@ -11,7 +11,24 @@ interface U {
   role: "admin" | "team";
   active: boolean;
   clickupName: string | null;
+  canPortal: boolean;
+  canForm: boolean;
   lastLogin: number | null;
+}
+
+// The two halves of the team side, switched on per login. Shown as a pair of chips you click.
+function Access({ on, label, title, onClick }: { on: boolean; label: string; title: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={`rounded-full border px-2.5 py-1 text-[12px] transition ${on ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--bg)]" : "border-[var(--line)] text-[var(--muted)] hover:text-[var(--ink)]"}`}
+    >
+      {on ? "✓ " : ""}
+      {label}
+    </button>
+  );
 }
 
 function MemberSelect({ value, members, onChange, className = "" }: { value: string; members: string[]; onChange: (v: string) => void; className?: string }) {
@@ -33,7 +50,9 @@ export default function LoginsManager() {
   const [users, setUsers] = useState<U[]>([]);
   const [me, setMe] = useState<{ id: string } | null>(null);
   const [adding, setAdding] = useState(false);
-  const [f, setF] = useState({ name: "", email: "", password: "", role: "team", clickupName: "" });
+  // A new teammate gets the update form by default. WhatsApp is ticked on deliberately, because it
+  // shows real client conversations, so it is never switched on by accident.
+  const [f, setF] = useState({ name: "", email: "", password: "", role: "team", clickupName: "", canForm: true, canPortal: false });
   const [myPw, setMyPw] = useState("");
   const [members, setMembers] = useState<string[]>([]);
 
@@ -72,13 +91,20 @@ export default function LoginsManager() {
             <option value="admin">Owner (full access)</option>
           </select>
           <MemberSelect value={f.clickupName} members={members} onChange={(v) => setF({ ...f, clickupName: v })} />
-          <div className="flex items-center justify-end">
+          {f.role === "team" && (
+            <div className="col-span-2 flex items-center gap-2 pt-1">
+              <span className="text-[12.5px] text-[var(--ink-2)]">Can open:</span>
+              <Access on={f.canForm} label="Update form" title="Send client updates for your approval" onClick={() => setF({ ...f, canForm: !f.canForm })} />
+              <Access on={f.canPortal} label="WhatsApp" title="The client chats, with names and numbers hidden" onClick={() => setF({ ...f, canPortal: !f.canPortal })} />
+            </div>
+          )}
+          <div className="col-span-2 flex items-center justify-end">
             <button
               className="btn btn-dark btn-sm"
-              disabled={!f.name || !f.email || f.password.length < 8}
+              disabled={!f.name || !f.email || f.password.length < 8 || (f.role === "team" && !f.canForm && !f.canPortal)}
               onClick={async () => {
                 if (await call({ action: "create", ...f }, `${f.name} can now sign in`)) {
-                  setF({ name: "", email: "", password: "", role: "team", clickupName: "" });
+                  setF({ name: "", email: "", password: "", role: "team", clickupName: "", canForm: true, canPortal: false });
                   setAdding(false);
                 }
               }}
@@ -98,6 +124,22 @@ export default function LoginsManager() {
               </div>
               <div className="text-[12px] text-[var(--muted)]">{u.lastLogin ? `Last sign-in ${ago(u.lastLogin)}` : "Never signed in"}</div>
             </div>
+            {u.role === "team" && (
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Access
+                  on={u.canForm}
+                  label="Form"
+                  title="Send client updates for your approval"
+                  onClick={() => call({ action: "update", id: u.id, canForm: !u.canForm }, u.canForm ? `${u.name} can no longer open the form` : `${u.name} can open the form`)}
+                />
+                <Access
+                  on={u.canPortal}
+                  label="WhatsApp"
+                  title="The client chats, with names and numbers hidden"
+                  onClick={() => call({ action: "update", id: u.id, canPortal: !u.canPortal }, u.canPortal ? `${u.name} can no longer open WhatsApp` : `${u.name} can open WhatsApp`)}
+                />
+              </div>
+            )}
             {u.role === "team" && (
               <MemberSelect
                 className="!h-8 !w-[190px] !py-0 !text-[12.5px]"

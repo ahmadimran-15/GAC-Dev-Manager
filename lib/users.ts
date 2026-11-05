@@ -13,6 +13,9 @@ export interface User {
   role: Role;
   active: boolean;
   clickupName: string | null; // their ClickUp username, for "My tasks" and timers
+  // Which halves of the team side this login may open. The owner always has both.
+  canPortal: boolean; // the WhatsApp portal
+  canForm: boolean; // the update form
   lastLogin: number | null;
   createdAt: number;
 }
@@ -25,11 +28,28 @@ interface Row {
   password_hash: string;
   active: number;
   clickup_name: string | null;
+  can_portal: number | null;
+  can_form: number | null;
   last_login: number | null;
   created_at: number;
 }
 
-const toUser = (r: Row): User => ({ id: r.id, email: r.email, name: r.name, role: r.role, active: !!r.active, clickupName: r.clickup_name ?? null, lastLogin: r.last_login ? Number(r.last_login) : null, createdAt: Number(r.created_at) });
+// An older row has no access columns yet, so a missing value counts as allowed: nobody loses access
+// to something they could already open just because the column was added underneath them.
+const flag = (v: number | null | undefined) => v === null || v === undefined || !!v;
+
+const toUser = (r: Row): User => ({
+  id: r.id,
+  email: r.email,
+  name: r.name,
+  role: r.role,
+  active: !!r.active,
+  clickupName: r.clickup_name ?? null,
+  canPortal: r.role === "admin" || flag(r.can_portal),
+  canForm: r.role === "admin" || flag(r.can_form),
+  lastLogin: r.last_login ? Number(r.last_login) : null,
+  createdAt: Number(r.created_at),
+});
 
 export function hashPassword(pw: string) {
   const salt = randomBytes(16);
@@ -74,15 +94,28 @@ export async function getUser(id: string) {
   return r ? toUser(r) : null;
 }
 
-export async function createUser(u: { email: string; name: string; role: Role; password: string; clickupName?: string | null }) {
+export async function createUser(u: { email: string; name: string; role: Role; password: string; clickupName?: string | null; canPortal?: boolean; canForm?: boolean }) {
   if (u.password.length < 8) throw new Error("Password must be at least 8 characters");
   if (await get("select 1 from users where lower(email) = lower(?)", u.email.trim())) throw new Error("A login with this email already exists");
   const id = uid("u_");
-  await run("insert into users (id, email, name, role, password_hash, clickup_name, created_at) values (?,?,?,?,?,?,?)", id, u.email.trim().toLowerCase(), u.name.trim(), u.role, hashPassword(u.password), u.clickupName || null, Date.now());
+  await run(
+    "insert into users (id, email, name, role, password_hash, clickup_name, can_portal, can_form, created_at) values (?,?,?,?,?,?,?,?,?)",
+    id,
+    u.email.trim().toLowerCase(),
+    u.name.trim(),
+    u.role,
+    hashPassword(u.password),
+    u.clickupName || null,
+    u.canPortal === false ? 0 : 1,
+    u.canForm === false ? 0 : 1,
+    Date.now(),
+  );
   return id;
 }
 
-export async function updateUser(id: string, f: { name?: string; active?: boolean; password?: string; role?: Role; clickupName?: string | null }) {
+export async function updateUser(id: string, f: { name?: string; active?: boolean; password?: string; role?: Role; clickupName?: string | null; canPortal?: boolean; canForm?: boolean }) {
+  if (f.canPortal !== undefined) await run("update users set can_portal = ? where id = ?", f.canPortal ? 1 : 0, id);
+  if (f.canForm !== undefined) await run("update users set can_form = ? where id = ?", f.canForm ? 1 : 0, id);
   if (f.password !== undefined) {
     if (f.password.length < 8) throw new Error("Password must be at least 8 characters");
     await run("update users set password_hash = ? where id = ?", hashPassword(f.password), id);

@@ -8,8 +8,14 @@ export interface Session {
   email: string;
   name: string;
   role: "admin" | "team";
+  // What this login may open, carried in the cookie so the middleware can decide without a query.
+  // Missing (a cookie issued before this existed) counts as both, the behaviour it was issued under.
+  portal?: boolean;
+  form?: boolean;
   exp: number;
 }
+
+export const mayOpen = (s: Session, what: "portal" | "form") => s.role === "admin" || (what === "portal" ? s.portal !== false : s.form !== false);
 
 const enc = new TextEncoder();
 const b64url = (buf: ArrayBuffer | Uint8Array) =>
@@ -28,8 +34,8 @@ async function sign(data: string) {
   return b64url(await crypto.subtle.sign("HMAC", await key(), enc.encode(data)));
 }
 
-export async function createSession(u: { id: string; email: string; name: string; role: "admin" | "team" }) {
-  const payload = b64url(enc.encode(JSON.stringify({ id: u.id, email: u.email, name: u.name, role: u.role, exp: Date.now() + WEEK })));
+export async function createSession(u: { id: string; email: string; name: string; role: "admin" | "team"; portal?: boolean; form?: boolean }) {
+  const payload = b64url(enc.encode(JSON.stringify({ id: u.id, email: u.email, name: u.name, role: u.role, portal: u.portal !== false, form: u.form !== false, exp: Date.now() + WEEK })));
   return `${payload}.${await sign(payload)}`;
 }
 

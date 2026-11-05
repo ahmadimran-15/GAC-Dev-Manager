@@ -7,6 +7,7 @@ import HealthPanel from "@/components/HealthPanel";
 import LoginsManager from "@/components/LoginsManager";
 import GroupsManager from "@/components/GroupsManager";
 import TeamNumbersManager from "@/components/TeamNumbersManager";
+import TeamWhatsAppAccess from "@/components/TeamWhatsAppAccess";
 import TimeTrackingSettings from "@/components/TimeTrackingSettings";
 import CurrentProjects from "@/components/CurrentProjects";
 import { ago } from "@/components/ui";
@@ -189,6 +190,9 @@ export default function Settings() {
 
       <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">WhatsApp groups in the inbox</h2>
       <GroupsManager />
+
+      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">What the team's WhatsApp portal shows</h2>
+      <TeamWhatsAppAccess />
 
       <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Logins</h2>
       <LoginsManager />

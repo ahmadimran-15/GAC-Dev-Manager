@@ -18,12 +18,22 @@ export async function POST(req: Request) {
     switch (b.action) {
       case "create":
         if (!b.email || !b.name || !b.password) return NextResponse.json({ error: "Name, email and password are required" }, { status: 400 });
-        return NextResponse.json({ id: await createUser({ email: b.email, name: b.name, password: b.password, role: (b.role === "admin" ? "admin" : "team") as Role, clickupName: b.clickupName || null }) });
+        return NextResponse.json({
+          id: await createUser({
+            email: b.email,
+            name: b.name,
+            password: b.password,
+            role: (b.role === "admin" ? "admin" : "team") as Role,
+            clickupName: b.clickupName || null,
+            canPortal: b.canPortal !== false,
+            canForm: b.canForm !== false,
+          }),
+        });
       case "update": {
         const target = await getUser(b.id);
         if (!target) return NextResponse.json({ error: "Login not found" }, { status: 404 });
         if (target.role === "admin" && (b.active === false || b.role === "team") && (await adminCount()) <= 1) return NextResponse.json({ error: "You can't remove the last owner login" }, { status: 400 });
-        await updateUser(b.id, { name: b.name, active: b.active, password: b.password || undefined, role: b.role, clickupName: b.clickupName });
+        await updateUser(b.id, { name: b.name, active: b.active, password: b.password || undefined, role: b.role, clickupName: b.clickupName, canPortal: b.canPortal, canForm: b.canForm });
         return NextResponse.json({ ok: true });
       }
       case "delete": {

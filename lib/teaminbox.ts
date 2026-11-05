@@ -1,6 +1,8 @@
-import { all } from "@/lib/db";
+import { all, get } from "@/lib/db";
 import { getConversation, getMessages, listConversations, type Message } from "@/lib/store";
-import { numberNames, waAccounts, withNames } from "@/lib/whatsapp";
+import { onTeamAccount, teamWaAccounts } from "@/lib/team-access";
+import { teamNumbers } from "@/lib/team-numbers";
+import { waAccounts, withNames } from "@/lib/whatsapp";
 
 // What the team's WhatsApp inbox is allowed to see. Everything a teammate could use to reach a client
 // directly is removed here, on the server: no phone numbers, group ids or emails ever leave this file,
@@ -21,10 +23,13 @@ export const scrub = (s: string) =>
     .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, "[email]")
     .replace(/(?<![\w@/])\+?\d[\d\s().-]{6,}\d(?![\w/])/g, (m) => (m.replace(/\D/g, "").length >= 9 ? "[number]" : m));
 
+// Only our own side is ever named. A client keeps their name out of the team's view even when the
+// phone has them saved as a contact, so every chat that is not one of ours simply reads "Client".
 function label(c: { name: string; externalId: string }, names: Map<string, string>) {
-  if (c.externalId.endsWith("@g.us")) return isNumber(c.name) ? "WhatsApp group" : scrub(c.name);
-  const n = isNumber(c.name) ? (names.get(c.name.replace(/\D/g, "")) ?? "") : c.name;
-  return n && !isNumber(n) ? firstName(n) : "WhatsApp client";
+  if (c.externalId.endsWith("@g.us")) return isNumber(c.name) ? "Group" : scrub(c.name);
+  // Matched on the chat's own number, not its saved name, so it works whichever way it was stored.
+  const n = names.get(c.externalId.replace(/\D/g, "")) ?? names.get(c.name.replace(/\D/g, "")) ?? "";
+  return n && !isNumber(n) ? firstName(n) : "Client";
 }
 
 // "M Yousaf Imran: hello" → "Yousaf: hello" (group senders), then numbers/ids/emails removed
@@ -36,13 +41,26 @@ function teamText(text: string, group: boolean, names: Map<string, string>) {
 
 const body = (m: Message) => m.text || m.transcript || (m.kind === "voice" ? "🎤 Voice note (no transcript yet)" : m.kind === "image" ? "🖼 Image" : m.kind === "file" ? "📎 File" : "");
 
-const shortNames = async () => new Map([...(await numberNames())].map(([n, full]) => [n, firstName(full)]));
+// Only our own side is named here: the numbers saved in Settings → Team numbers, plus your own
+// connected numbers. The phone's contact book is deliberately not used — a client saved as
+// "Fazil Khan" would otherwise be named to the team, which is the thing we are preventing.
+const shortNames = async () => {
+  const map = new Map<string, string>();
+  const [team, accounts, owner] = await Promise.all([
+    teamNumbers(),
+    waAccounts(),
+    get<{ name: string }>("select name from users where role = 'admin' order by created_at limit 1").catch(() => null),
+  ]);
+  for (const t of team) if (t.number && t.name) map.set(t.number, firstName(t.name));
+  for (const a of accounts) if (owner?.name && a.address && /^\d+$/.test(a.address)) map.set(a.address, firstName(owner.name));
+  return map;
+};
 // Chats with our own numbers (e.g. the reminders you get on WhatsApp) aren't client chats
 const ourOwn = async () => new Set((await waAccounts()).map((a) => a.address).filter(Boolean));
 
 export async function teamChats() {
-  const [names, own] = await Promise.all([shortNames(), ourOwn()]);
-  const list = (await listConversations()).filter((c) => c.channel === "whatsapp" && !c.internal && !c.demo && !own.has(c.externalId));
+  const [names, own, allowed] = await Promise.all([shortNames(), ourOwn(), teamWaAccounts()]);
+  const list = (await listConversations()).filter((c) => c.channel === "whatsapp" && !c.internal && !c.demo && !own.has(c.externalId) && onTeamAccount(allowed, c.account));
   return {
     now: Date.now(),
     chats: list.map((c) => {
@@ -61,9 +79,9 @@ export async function teamChats() {
 }
 
 export async function teamThread(convId: string, meId: string) {
-  const [names, own] = await Promise.all([shortNames(), ourOwn()]);
+  const [names, own, allowed] = await Promise.all([shortNames(), ourOwn(), teamWaAccounts()]);
   const c = await getConversation(convId);
-  if (!c || c.channel !== "whatsapp" || c.internal || c.demo || own.has(c.external_id)) return null;
+  if (!c || c.channel !== "whatsapp" || c.internal || c.demo || own.has(c.external_id) || !onTeamAccount(allowed, c.account)) return null;
   const group = c.external_id.endsWith("@g.us");
   const since = Date.now() - HISTORY_DAYS * 86400_000;
   const msgs = (await getMessages(convId)).filter((m) => Number(m.created_at) >= since).slice(-80);
