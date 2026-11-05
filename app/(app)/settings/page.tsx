@@ -1,13 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { ChevronRight } from "lucide-react";
 import { api, useLive } from "@/components/Live";
 import { reminderSettings } from "@/components/Reminders";
 import AccountsManager from "@/components/AccountsManager";
 import HealthPanel from "@/components/HealthPanel";
-import LoginsManager from "@/components/LoginsManager";
 import GroupsManager from "@/components/GroupsManager";
-import TeamNumbersManager from "@/components/TeamNumbersManager";
-import TeamWhatsAppAccess from "@/components/TeamWhatsAppAccess";
 import TimeTrackingSettings from "@/components/TimeTrackingSettings";
 import CurrentProjects from "@/components/CurrentProjects";
 import { ago } from "@/components/ui";
@@ -66,8 +65,21 @@ function ClickUpWebhook({ publicUrl }: { publicUrl: string | null }) {
   );
 }
 
+// One section at a time, picked from the row of buttons at the top. Everything used to be on one
+// page, which meant scrolling past system health to reach anything further down.
+const TABS = [
+  { id: "health", label: "Health" },
+  { id: "projects", label: "Projects" },
+  { id: "time", label: "Time tracking" },
+  { id: "reminders", label: "Reminders" },
+  { id: "accounts", label: "Accounts" },
+  { id: "ai", label: "AI & tasks" },
+  { id: "groups", label: "Groups" },
+];
+
 export default function Settings() {
   const { state, refresh, toast } = useLive();
+  const [tab, setTab] = useState("health");
   const [origin, setOrigin] = useState("");
   const [every, setEvery] = useState(5);
   const [after, setAfter] = useState(2);
@@ -75,6 +87,9 @@ export default function Settings() {
 
   useEffect(() => {
     setOrigin(window.location.origin);
+    // /settings#health from the problem badge in the top bar still opens the right section.
+    const hash = window.location.hash.replace("#", "");
+    if (TABS.some((t) => t.id === hash)) setTab(hash);
     const s = reminderSettings.get();
     setEvery(s.every);
     setAfter(s.after);
@@ -92,18 +107,33 @@ export default function Settings() {
   return (
     <div className="fade-in mx-auto max-w-[820px] px-4 pb-20 pt-6 md:px-6 md:pt-10">
       <h1 className="text-[30px] font-semibold tracking-tight">Settings</h1>
-      <p className="mt-1 text-[15px] text-[var(--ink-2)]">System health, accounts, logins and reminders.</p>
+      <p className="mt-1 text-[15px] text-[var(--ink-2)]">System health, accounts, projects and reminders. Logins moved to Users.</p>
 
-      <h2 id="health" className="mb-1 mt-10 text-[13.5px] font-semibold">System health</h2>
-      <HealthPanel />
+      <div className="sticky top-14 z-20 -mx-4 mb-6 mt-5 overflow-x-auto border-b border-[var(--line)] bg-[var(--bg)]/90 px-4 py-2 backdrop-blur-md md:-mx-6 md:px-6">
+        <div className="flex gap-1.5">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-[13px] transition ${tab === t.id ? "bg-white font-medium text-[var(--ink)] shadow-[0_0_0_1px_var(--line)]" : "text-[var(--ink-2)] hover:text-[var(--ink)]"}`}
+            >
+              {t.label}
+              {t.id === "health" && (state?.health?.problems.length ?? 0) > 0 && (
+                <span className="tnum ml-1.5 rounded-full bg-[var(--red)] px-1.5 text-[10.5px] font-semibold text-white">{state!.health!.problems.length}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      <h2 id="projects" className="mb-1 mt-10 text-[13.5px] font-semibold">Current projects</h2>
-      <CurrentProjects />
+      {tab === "health" && <HealthPanel />}
 
-      <h2 id="time" className="mb-1 mt-10 text-[13.5px] font-semibold">Time tracking</h2>
-      <TimeTrackingSettings />
+      {tab === "projects" && <CurrentProjects />}
 
-      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Reminders</h2>
+      {tab === "time" && <TimeTrackingSettings />}
+
+      {tab === "reminders" && (
+        <>
       <div className="card divide-y divide-[var(--line)] px-5">
         <div className="flex flex-wrap items-center gap-3 py-4 text-[14px]">
           Remind me every
@@ -152,8 +182,12 @@ export default function Settings() {
         />
         <div className="py-3 text-[12.5px] text-[var(--muted)]">Each client can have its own reminder time: open the conversation in the inbox and pick “Remind after”.</div>
       </div>
+        </>
+      )}
 
-      <h2 id="accounts" className="mb-1 mt-10 text-[13.5px] font-semibold">Mailboxes &amp; WhatsApp numbers</h2>
+      {tab === "accounts" && (
+        <>
+      <h2 id="accounts" className="mb-1 text-[13.5px] font-semibold">Mailboxes &amp; WhatsApp numbers</h2>
       <p className="mb-3 text-[13px] text-[var(--ink-2)]">Every place clients can reach the company. New messages land in your inbox only; replies are sent by this server from the account you pick. Your team never gets these passwords.</p>
       <AccountsManager />
       <div className="mt-2 text-[12.5px] text-[var(--muted)]">
@@ -167,8 +201,10 @@ export default function Settings() {
         <Row name="Slack" ok={null} detail="Needs a Slack app (bot + user token). There is no QR login for Slack. I'll connect it once you create the app." />
         <Row name="Microsoft Teams & Outlook" ok={null} detail="Needs one Azure app registration (Sign in with Microsoft). Outlook no longer allows plain password login." />
       </div>
+        </>
+      )}
 
-      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">AI & tasks</h2>
+      {tab === "ai" && (
       <div className="card divide-y divide-[var(--line)] px-5">
         <Row name="Gemini (your custom server)" ok={k ? k.gemini : null} detail="Writes suggested replies, polishes messages, drafts tasks and understands voice commands." />
         <Row
@@ -184,18 +220,19 @@ export default function Settings() {
           {k?.clickup && <ClickUpWebhook publicUrl={k.publicUrl} />}
         </Row>
       </div>
+      )}
 
-      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Our side: team numbers</h2>
-      <TeamNumbersManager />
+      {tab === "groups" && <GroupsManager />}
 
-      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">WhatsApp groups in the inbox</h2>
-      <GroupsManager />
-
-      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">What the team's WhatsApp portal shows</h2>
-      <TeamWhatsAppAccess />
-
-      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Logins</h2>
-      <LoginsManager />
+      {/* Logins, team numbers and what the team may see now live on their own page: this one was
+          long enough that adding a teammate meant scrolling past everything above. */}
+      <Link href="/users" className="card mt-10 flex items-center justify-between gap-4 px-5 py-4 transition hover:border-[var(--line-2)]">
+        <div>
+          <div className="font-medium">Users</div>
+          <p className="mt-0.5 text-[13px] text-[var(--ink-2)]">Logins, what each teammate can open, team numbers, and how much of WhatsApp the team sees.</p>
+        </div>
+        <ChevronRight size={18} className="shrink-0 text-[var(--muted)]" />
+      </Link>
 
       {state?.hasDemo && (
         <>

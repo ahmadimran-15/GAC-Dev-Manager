@@ -23,7 +23,7 @@ function Access({ on, label, title, onClick }: { on: boolean; label: string; tit
       type="button"
       title={title}
       onClick={onClick}
-      className={`rounded-full border px-2.5 py-1 text-[12px] transition ${on ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--bg)]" : "border-[var(--line)] text-[var(--muted)] hover:text-[var(--ink)]"}`}
+      className={`shrink-0 whitespace-nowrap rounded-full border px-2.5 py-1 text-[12px] transition ${on ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--bg)]" : "border-[var(--line)] text-[var(--muted)] hover:text-[var(--ink)]"}`}
     >
       {on ? "✓ " : ""}
       {label}
@@ -116,13 +116,15 @@ export default function LoginsManager() {
       )}
       <div className="divide-y divide-[var(--line)]">
         {users.map((u) => (
-          <div key={u.id} className={`flex items-center gap-3 py-2.5 ${u.active ? "" : "opacity-50"}`}>
+          // Wraps onto a second line rather than squeezing the name away: a team row carries the two
+          // access chips, the ClickUp picker and three buttons, which is more than one line can hold.
+          <div key={u.id} className={`flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5 ${u.active ? "" : "opacity-50"}`}>
             <Avatar name={u.name} size={28} />
-            <div className="min-w-0 flex-1">
+            <div className="min-w-[200px] flex-1">
               <div className="truncate text-[13.5px]">
                 <span className="font-medium">{u.name}</span> <span className="text-[var(--muted)]">· {u.email}</span>
               </div>
-              <div className="text-[12px] text-[var(--muted)]">{u.lastLogin ? `Last sign-in ${ago(u.lastLogin)}` : "Never signed in"}</div>
+              <div className="truncate text-[12px] text-[var(--muted)]">{u.lastLogin ? `Last sign-in ${ago(u.lastLogin)}` : "Never signed in"}</div>
             </div>
             {u.role === "team" && (
               <div className="flex shrink-0 items-center gap-1.5">
@@ -148,26 +150,28 @@ export default function LoginsManager() {
                 onChange={(v) => call({ action: "update", id: u.id, clickupName: v }, v ? `${u.name} linked to ClickUp “${v}”` : "ClickUp link removed")}
               />
             )}
-            <Pill tone={u.role === "admin" ? "dark" : "gray"}>{u.role === "admin" ? "Owner" : "Team"}</Pill>
-            {u.id !== me?.id && (
-              <>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => {
-                    const pw = prompt(`New password for ${u.name} (8+ characters):`);
-                    if (pw) call({ action: "update", id: u.id, password: pw }, "Password reset");
-                  }}
-                >
-                  Reset password
-                </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => call({ action: "update", id: u.id, active: !u.active }, u.active ? "Access paused" : "Access restored")}>
-                  {u.active ? "Pause" : "Restore"}
-                </button>
-                <button className="btn btn-ghost btn-sm !px-2" onClick={() => confirm(`Remove ${u.name}'s login?`) && call({ action: "delete", id: u.id }, "Login removed")}>
-                  <Trash2 size={14} />
-                </button>
-              </>
-            )}
+            <div className="ml-auto flex shrink-0 items-center gap-2 whitespace-nowrap">
+              <Pill tone={u.role === "admin" ? "dark" : "gray"}>{u.role === "admin" ? "Owner" : "Team"}</Pill>
+              {u.id !== me?.id && (
+                <>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      const pw = prompt(`New password for ${u.name} (8+ characters):`);
+                      if (pw) call({ action: "update", id: u.id, password: pw }, "Password reset");
+                    }}
+                  >
+                    Reset password
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => call({ action: "update", id: u.id, active: !u.active }, u.active ? "Access paused" : "Access restored")}>
+                    {u.active ? "Pause" : "Restore"}
+                  </button>
+                  <button className="btn btn-ghost btn-sm !px-2" onClick={() => confirm(`Remove ${u.name}'s login?`) && call({ action: "delete", id: u.id }, "Login removed")}>
+                    <Trash2 size={14} />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         ))}
       </div>

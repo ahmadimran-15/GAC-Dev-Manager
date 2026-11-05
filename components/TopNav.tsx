@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Image as ImageIcon, Inbox, LayoutGrid, LogOut, Mic, Settings, Sparkles, Users } from "lucide-react";
+import { Image as ImageIcon, Inbox, LayoutGrid, LogOut, Mic, Settings, Sparkles, UserCog, Users } from "lucide-react";
 import { useLive } from "@/components/Live";
 import Reminders from "@/components/Reminders";
 
@@ -13,6 +13,7 @@ const LINKS = [
   { href: "/assistant", label: "Assistant", Icon: Sparkles },
   { href: "/image", label: "Image", Icon: ImageIcon },
   { href: "/settings", label: "Settings", Icon: Settings },
+  { href: "/users", label: "Users", Icon: UserCog },
 ];
 
 // Laptop: one top bar. Phone: compact top bar + a tab bar at the bottom (thumb reach).
@@ -23,6 +24,10 @@ export default function TopNav() {
   const waiting = state?.stats.waiting ?? 0;
   const problems = state?.health?.problems.length ?? 0;
   const isOn = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+  const signOut = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    location.href = "/login";
+  };
 
   return (
     <>
@@ -66,6 +71,14 @@ export default function TopNav() {
               <kbd className="ml-auto hidden rounded border border-[var(--line-2)] px-1.5 text-[11px] lg:inline">/</kbd>
             </button>
             <Reminders />
+            {/* Sign out in the bar itself: it used to be hidden behind the avatar, where nobody looked. */}
+            <button
+              onClick={signOut}
+              title="Sign out"
+              className="hidden h-9 shrink-0 items-center gap-1.5 rounded-xl border border-[var(--line-2)] bg-white px-3 text-[13px] text-[var(--ink-2)] transition hover:border-[#c9c9c3] hover:text-[var(--ink)] md:inline-flex"
+            >
+              <LogOut size={14} /> Sign out
+            </button>
             <div className="relative">
               <button className="grid h-9 w-9 place-items-center rounded-full bg-[#171717] text-[12px] font-semibold text-white" onClick={() => setMenu((m) => !m)}>
                 {(state?.me?.name ?? "Me").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
@@ -74,10 +87,7 @@ export default function TopNav() {
                 <div className="pop-in absolute right-0 top-11 w-44 rounded-xl border border-[var(--line)] bg-white p-1 shadow-lg">
                   <button
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-[var(--hover)]"
-                    onClick={async () => {
-                      await fetch("/api/auth/logout", { method: "POST" });
-                      location.href = "/login";
-                    }}
+                    onClick={signOut}
                   >
                     <LogOut size={14} /> Sign out
                   </button>
@@ -89,13 +99,18 @@ export default function TopNav() {
       </header>
 
       {/* Phone tab bar */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-[var(--line)] bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden">
+      {/* One column per link: it was fixed at 5 while the list had already grown past that, which
+          pushed the last tabs onto a second row. */}
+      <nav
+        className="fixed inset-x-0 bottom-0 z-40 grid border-t border-[var(--line)] bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
+        style={{ gridTemplateColumns: `repeat(${LINKS.length}, minmax(0, 1fr))` }}
+      >
         {LINKS.map(({ href, label, Icon }) => {
           const on = isOn(href);
           return (
-            <Link key={href} href={href} className={`relative flex flex-col items-center gap-0.5 py-2 text-[11px] ${on ? "font-semibold text-[var(--ink)]" : "text-[var(--muted)]"}`}>
-              <Icon size={20} strokeWidth={on ? 2.2 : 1.8} />
-              {label}
+            <Link key={href} href={href} className={`relative flex flex-col items-center gap-0.5 py-2 text-[10.5px] ${on ? "font-semibold text-[var(--ink)]" : "text-[var(--muted)]"}`}>
+              <Icon size={19} strokeWidth={on ? 2.2 : 1.8} />
+              <span className="w-full truncate px-0.5 text-center">{label}</span>
               {href === "/inbox" && waiting > 0 && (
                 <span className="tnum absolute left-1/2 top-1 ml-2 min-w-[16px] rounded-full bg-[var(--red)] px-1 text-center text-[10px] font-semibold leading-4 text-white">{waiting}</span>
               )}

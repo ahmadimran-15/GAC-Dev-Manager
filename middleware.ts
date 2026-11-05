@@ -28,7 +28,7 @@ export async function middleware(req: NextRequest) {
     const wants = PORTAL.some((r) => r.test(pathname)) ? "portal" : FORM.some((r) => r.test(pathname)) ? "form" : null;
     if (!wants || !mayOpen(s, wants)) {
       if (pathname.startsWith("/api/")) return NextResponse.json({ error: "Not allowed" }, { status: 403 });
-      const home = mayOpen(s, "portal") ? "/portal" : mayOpen(s, "form") ? "/form" : "/login";
+      const home = mayOpen(s, "form") ? "/form" : mayOpen(s, "portal") ? "/portal" : "/login";
       // Nowhere left to send them: the owner has switched both halves off, so end the session.
       if (home === "/login" && pathname === "/login") return NextResponse.next();
       const url = req.nextUrl.clone();

@@ -13,8 +13,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Wrong email or password" }, { status: 401 });
     }
     if (u.role === "team" && !u.canPortal && !u.canForm) return NextResponse.json({ error: "This login has no access yet. Ask the owner to switch something on." }, { status: 403 });
-    // Land on whichever side they actually have: the WhatsApp portal, or the update form.
-    const home = u.role === "admin" ? "/" : u.canPortal ? "/portal" : "/form";
+    // A teammate lands on the update form, which is the everyday job. The WhatsApp portal is there
+    // for whoever has it, but it is not where they start.
+    const home = u.role === "admin" ? "/" : u.canForm ? "/form" : "/portal";
     const res = NextResponse.json({ ok: true, role: u.role, home });
     res.cookies.set(SESSION_COOKIE, await createSession({ ...u, portal: u.canPortal, form: u.canForm }), cookieOptions(isHttps(req)));
     return res;
