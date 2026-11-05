@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Search } from "lucide-react";
+import TeamNav, { type TeamCan } from "@/components/TeamNav";
 
 export const dynamic = "force-dynamic";
 
@@ -84,7 +85,7 @@ function Picker({ label, value, options, onPick, disabled, empty }: { label: str
 // Public update form: no login. Pick the project, pick the task, write the update, send it for approval.
 // Nothing about clients is shown here — only project and task names.
 export default function UpdateForm() {
-  const [data, setData] = useState<{ me: { name: string }; projects: string[]; tasks: Task[] } | null>(null);
+  const [data, setData] = useState<{ me: { name: string }; can: TeamCan; projects: string[]; tasks: Task[] } | null>(null);
   const [project, setProject] = useState("");
   const [taskId, setTaskId] = useState("");
   const [text, setText] = useState("");
@@ -119,24 +120,7 @@ export default function UpdateForm() {
 
   return (
     <div className="mx-auto w-full max-w-[640px] px-4 pb-20 pt-10 md:px-6">
-      <div className="mb-8 flex items-center gap-2">
-        <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#171717] text-[13px] font-bold text-white">G</span>
-        <span className="font-semibold tracking-tight">GAC Desk</span>
-        {data && (
-          <span className="ml-auto flex items-center gap-3 text-[13px] text-[var(--muted)]">
-            {data.me.name}
-            <button
-              className="hover:text-[var(--ink)]"
-              onClick={async () => {
-                await fetch("/api/auth/logout", { method: "POST" });
-                location.href = "/login";
-              }}
-            >
-              Sign out
-            </button>
-          </span>
-        )}
-      </div>
+      <TeamNav name={data?.me.name} can={data?.can ?? { form: true, portal: false }} active="form" />
 
       <h1 className="text-[28px] font-semibold tracking-tight">Send an update</h1>
       <p className="mt-1 text-[14.5px] text-[var(--ink-2)]">

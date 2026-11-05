@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { get } from "@/lib/db";
 import { board } from "@/lib/clickup";
 import { currentUser } from "@/lib/auth";
+import { mayOpen } from "@/lib/session";
 import { addDraft } from "@/lib/store";
 import { taskConversation } from "@/lib/taskchat";
 import { scrub } from "@/lib/teaminbox";
@@ -26,6 +27,8 @@ export async function GET() {
   // ("send R1 to name@client.com"), so titles are scrubbed the same way the team inbox scrubs chats.
   return NextResponse.json({
     me: { name: me.name },
+    // What else this login may open, so the bar can show the WhatsApp button only to those who have it
+    can: { form: mayOpen(me, "form"), portal: mayOpen(me, "portal") },
     projects: [...new Set(open.map((t) => scrub(t.project)))].sort((a, b2) => a.localeCompare(b2)),
     tasks: open.map((t) => ({ id: t.id, title: scrub(t.title), project: scrub(t.project) })).sort((a, b2) => a.title.localeCompare(b2.title)),
   });

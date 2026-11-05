@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { all, get } from "@/lib/db";
 import { currentUser } from "@/lib/auth";
+import { mayOpen } from "@/lib/session";
 import { addDraft } from "@/lib/store";
 import { board } from "@/lib/clickup";
 import { getUser, updateUser } from "@/lib/users";
@@ -37,6 +38,8 @@ export async function GET() {
   return NextResponse.json({
     now: Date.now(),
     me: { name: me.name, email: me.email, clickupName: cu },
+    // What else this login may open, so the bar can show only the buttons that work for them
+    can: { form: mayOpen(me, "form"), portal: mayOpen(me, "portal") },
     projects: b.projects,
     // First names only; a chat saved under a phone number or email never shows it
     clients: clients

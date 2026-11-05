@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock, LogOut, Pause, Play, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Pause, Play, XCircle } from "lucide-react";
+import TeamNav, { type TeamCan } from "@/components/TeamNav";
 import { clock, hm, useTick } from "@/components/TaskControls";
 import { Pill, STATUS_TONE } from "@/components/ui";
 import TeamInbox from "@/components/TeamInbox";
@@ -19,6 +20,7 @@ interface PTask {
 interface Info {
   now: number;
   me: { name: string; email: string; clickupName: string | null };
+  can: TeamCan;
   projects: string[];
   clients: { id: string; label: string; project: string | null }[];
   mine: { id: string; text: string; project: string | null; status: string; created_at: number; conv_name: string | null }[];
@@ -41,6 +43,10 @@ export default function Portal() {
   const [showPw, setShowPw] = useState(false);
   const [timerBusy, setTimerBusy] = useState(false);
   const [tab, setTab] = useState<"chats" | "work">("chats");
+  // "My tasks" in the bar links here with ?tab=work, so arriving from the form opens the right half.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "work") setTab("work");
+  }, []);
   const now = useTick(info?.now);
 
   const load = () =>
@@ -88,30 +94,14 @@ export default function Portal() {
   }
 
   const clients = (info?.clients ?? []).filter((c) => !project || !c.project || c.project === project);
-  const tabBtn = (on: boolean) => `rounded-lg px-3 py-1.5 text-[13.5px] transition ${on ? "bg-white font-medium shadow-[0_0_0_1px_var(--line)]" : "text-[var(--ink-2)] hover:text-[var(--ink)]"}`;
 
   return (
     <div className={`mx-auto px-4 py-6 md:px-6 md:py-10 ${tab === "chats" ? "max-w-[1200px]" : "max-w-[640px]"}`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#171717] text-[13px] font-bold text-white">G</span>
-          <span className="font-semibold">GAC Desk</span>
-        </div>
-        <div className="flex items-center gap-1 text-[13px] text-[var(--ink-2)]">
-          {info?.me.name}
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowPw((s) => !s)}>
-            Password
-          </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={async () => {
-              await fetch("/api/auth/logout", { method: "POST" });
-              location.href = "/login";
-            }}
-          >
-            <LogOut size={13} /> Sign out
-          </button>
-        </div>
+      <TeamNav name={info?.me.name} can={info?.can ?? { form: true, portal: true }} active={tab} onTab={setTab} />
+      <div className="-mt-4 mb-2 flex justify-end">
+        <button className="btn btn-ghost btn-sm" onClick={() => setShowPw((s) => !s)}>
+          Password
+        </button>
       </div>
 
       {showPw && (
@@ -122,15 +112,6 @@ export default function Portal() {
           </button>
         </div>
       )}
-
-      <div className="mt-6 flex gap-1">
-        <button className={tabBtn(tab === "chats")} onClick={() => setTab("chats")}>
-          WhatsApp
-        </button>
-        <button className={tabBtn(tab === "work")} onClick={() => setTab("work")}>
-          Tasks & updates
-        </button>
-      </div>
 
       {tab === "chats" && (
         <div className="mt-4">
