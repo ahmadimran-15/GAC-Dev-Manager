@@ -60,7 +60,8 @@ function format(text: string, dark: boolean, depth = 0): ReactNode[] {
 export default function MessageText({ text, dark = false, className = "" }: { text: string; dark?: boolean; className?: string }) {
   return (
     <span dir="auto" className={`whitespace-pre-wrap ${className}`}>
-      {format(text, dark).map((n, i) => (
+      {/* A message with no text at all should render as nothing, not bring the page down. */}
+      {format(String(text ?? ""), dark).map((n, i) => (
         <Fragment key={i}>{n}</Fragment>
       ))}
     </span>

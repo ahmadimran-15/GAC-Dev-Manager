@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Clock, Search, Send, Users } from "lucide-react";
+import Guard from "@/components/Guard";
 import MessageText from "@/components/MessageText";
 import { Avatar, Ticks, Waiting, ago } from "@/components/ui";
 
@@ -107,7 +108,7 @@ export default function TeamInbox() {
       <div className={`min-h-0 flex-col ${open ? "flex" : "hidden md:flex"}`}>
         {!open && <div className="grid flex-1 place-items-center text-[13.5px] text-[var(--muted)]">Pick a chat</div>}
         {open && (
-          <>
+          <Guard what="this chat" key={open}>
             <div className="flex items-center gap-3 border-b border-[var(--line)] px-4 py-3">
               <button className="btn btn-ghost !h-8 !w-8 !p-0 md:hidden" onClick={() => setOpen(null)} title="All chats">
                 <ArrowLeft size={17} />
@@ -172,7 +173,7 @@ export default function TeamInbox() {
                 </button>
               </div>
             </div>
-          </>
+          </Guard>
         )}
       </div>
     </div>
