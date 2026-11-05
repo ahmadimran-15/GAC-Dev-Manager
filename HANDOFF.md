@@ -115,7 +115,7 @@ lib/whatsapp.ts          gateway client: sendWhatsApp (ONE request, quote + ment
                          (history walk), listTargets (groups from chat list, contacts paged), groupMembers (5 s, cached),
                          resolveMentions ("@Name" → "@923…" + mentions), registerWebhook (+ack events; keeps n8n)
 lib/inbound.ts           handleWhatsApp/storeWhatsApp (teammate = our reply, internal chats), applyDelivery/syncDelivery,
-                         sendToConversation (double-send guard, quote last client msg, mentions), sendToTarget,
+                         sendToConversation (double-send guard, plain send, mentions), sendToTarget,
                          reminders (WhatsApp + email), worker
 lib/backfill.ts          WhatsApp history import (batch insert, client groups only, name repair)
 lib/team-numbers.ts      "our side" numbers (kv team_numbers; default Abdullah 13055083815)
@@ -155,7 +155,7 @@ app/api/…                state, conversations/[id] (send, generate, context, i
 | WhatsApp in | Signed webhook (`message.received, message.sent, message.ack, message.failed`) next to n8n's. Test delivery 200. |
 | History import | 7 days imported (~2,700 msgs; 35 direct chats + 12 client groups). Runs on start / reconnect / Settings button. Groups only if a team number is in them or already tracked. Old unanswered (>24 h) new chats marked handled. |
 | Our side | Team numbers (Abdullah default). Their group messages = our reply ("Replied by Abdullah"); their DMs internal. "Not a client" toggle. Names instead of raw ids. |
-| WhatsApp out | **One request per send, never auto-resent** (a timeout-retry once caused duplicates, fixed). Quotes the client's last message; only a clear 4xx quote rejection retries unquoted. Same text to same chat within 60 s / while sending is blocked. `@Name` → mention (contacts + team numbers, group members 5 s/cached). **Owner is testing real sends himself.** Gateway takes ~25 s to accept a *quoted* send (1 s for other calls). |
+| WhatsApp out | **One request per send, never auto-resent** (a timeout-retry once caused duplicates, fixed). Sends plain, not as a reply: a quoted send took ~25 s on the gateway against ~1 s plain (owner switched it off, 5 Nov 2026). Quoting is opt-in in code. Same text to same chat within 60 s / while sending is blocked. `@Name` → mention (contacts + team numbers, group members 5 s/cached). **Owner is testing real sends himself.** |
 | Ticks | ✓ / ✓✓ / blue ✓✓ / red ! from ack events + 2-min sync. |
 | Reply box | Voice → text, **Generate** (draft or instruction → message, ~7 s), **Stop** while generating, Polish, Acknowledge. Guard against Gemini app prompts. |
 | AI context | Hideable per-conversation summary (all channels); ClickUp task "Get context" (+ Looms). |
@@ -189,9 +189,8 @@ team's own **tracking portal** (he will provide its APIs) so breaks pause the cl
 
 ## 7. Decisions waiting on the owner
 
-1. **Reply-quote on WhatsApp sends:** quoted sends take ~25 s on the gateway. Keep quoting, or switch it off for instant sends?
-2. **n8n bot replies** go out from the same number and count as "answered". Flag them so the client still shows waiting?
-3. **Messaging the team** from GAC Desk — owner will explain later. Don't build yet.
+1. **n8n bot replies** go out from the same number and count as "answered". Flag them so the client still shows waiting?
+2. **Messaging the team** from GAC Desk — owner will explain later. Don't build yet.
 
 ---
 
@@ -237,7 +236,7 @@ team's own **tracking portal** (he will provide its APIs) so breaks pause the cl
 1. §0 Start-up; give the owner the new tunnel URL.
 2. Owner tests sends himself; check what was actually sent if he reports a problem (compare `messages` with the gateway's
    `GET /messages?chatId=…`).
-3. Get the owner's answers to §7 (quote on/off, bot replies).
+3. Get the owner's answers to §7 (bot replies).
 4. Build Slack (§8.1) → give the manifest link → owner pastes xoxp + xapp tokens → test receive + send (send only with OK).
 5. Owner fixes Titan + Gmail (Settings → Edit) → test reading; send a test only with OK.
 6. Tracking-portal APIs → timers (§6) → owner approves → switch on.

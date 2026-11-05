@@ -283,9 +283,11 @@ async function sendOnceTo(convId: string, text: string, opts: { ack?: boolean; b
     via = kind === "email" ? sender.address : sender.label;
     if (kind === "email") r = await sendEmail(sender.id, c.external_id, c.subject, text);
     else {
-      // WhatsApp: reply to the client's latest message, and turn "@Name" into real mentions
+      // WhatsApp: turn "@Name" into real mentions. Messages go out plain, not as a reply to the
+      // client's last message: the gateway takes ~25 s to accept a quoted send against ~1 s for a
+      // plain one, and that wait was felt on every reply. Quoting is opt-in now (quote: true).
       const msgs = await getMessages(convId);
-      const lastIn = opts.quote === false ? undefined : [...msgs].reverse().find((m) => m.direction === "in" && m.external_id);
+      const lastIn = opts.quote ? [...msgs].reverse().find((m) => m.direction === "in" && m.external_id) : undefined;
       const m = await mentionsFor(text, c, sender.id);
       untagged = m.missed;
       r = await sendWhatsApp(c.external_id, m.text, sender.id, { quotedMessageId: lastIn?.external_id, mentions: m.mentions });

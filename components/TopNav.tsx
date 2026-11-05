@@ -24,7 +24,9 @@ export default function TopNav() {
   const waiting = state?.stats.waiting ?? 0;
   const problems = state?.health?.problems.length ?? 0;
   const isOn = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+  // Asked first: it sits in the bar you use all day, and signing out by accident is pure annoyance.
   const signOut = async () => {
+    if (!confirm("Sign out of GAC Desk?")) return;
     await fetch("/api/auth/logout", { method: "POST" });
     location.href = "/login";
   };
@@ -75,7 +77,7 @@ export default function TopNav() {
             <button
               onClick={signOut}
               title="Sign out"
-              className="hidden h-9 shrink-0 items-center gap-1.5 rounded-xl border border-[var(--line-2)] bg-white px-3 text-[13px] text-[var(--ink-2)] transition hover:border-[#c9c9c3] hover:text-[var(--ink)] md:inline-flex"
+              className="hidden h-9 shrink-0 items-center gap-1.5 rounded-xl border border-[var(--line-2)] bg-white px-3 text-[13px] text-[var(--ink-2)] transition hover:border-[#f0cfcf] hover:bg-[#fdecec] hover:text-[var(--red)] md:inline-flex"
             >
               <LogOut size={14} /> Sign out
             </button>
@@ -86,7 +88,7 @@ export default function TopNav() {
               {menu && (
                 <div className="pop-in absolute right-0 top-11 w-44 rounded-xl border border-[var(--line)] bg-white p-1 shadow-lg">
                   <button
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-[var(--hover)]"
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] transition hover:bg-[#fdecec] hover:text-[var(--red)]"
                     onClick={signOut}
                   >
                     <LogOut size={14} /> Sign out

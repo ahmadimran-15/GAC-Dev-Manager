@@ -13,7 +13,10 @@ export interface TeamCan {
 
 export type TeamTab = "form" | "chats" | "work";
 
-const signOut = async () => {
+// Asked first: it sits next to the buttons people use all day, and signing out by accident means
+// finding the password again.
+export const signOut = async () => {
+  if (!confirm("Sign out of GAC Desk?")) return;
   await fetch("/api/auth/logout", { method: "POST" });
   location.href = "/login";
 };
@@ -53,7 +56,10 @@ export default function TeamNav({ name, can, active, onTab }: { name?: string; c
 
       <span className="ml-auto flex shrink-0 items-center gap-3 text-[13px] text-[var(--muted)]">
         {name}
-        <button className="inline-flex items-center gap-1.5 hover:text-[var(--ink)]" onClick={signOut}>
+        <button
+          className="inline-flex items-center gap-1.5 rounded-lg border border-transparent px-2.5 py-1 transition hover:border-[#f0cfcf] hover:bg-[#fdecec] hover:text-[var(--red)]"
+          onClick={signOut}
+        >
           <LogOut size={14} /> Sign out
         </button>
       </span>
