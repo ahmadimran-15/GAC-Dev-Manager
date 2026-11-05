@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Image as ImageIcon, Inbox, LayoutGrid, LogOut, Mic, Settings, Sparkles, UserCog, Users } from "lucide-react";
 import { useLive } from "@/components/Live";
 import Reminders from "@/components/Reminders";
+import Confirm from "@/components/Confirm";
 
 const LINKS = [
   { href: "/", label: "Overview", Icon: LayoutGrid },
@@ -21,12 +22,12 @@ export default function TopNav() {
   const path = usePathname();
   const { state, openAssistant } = useLive();
   const [menu, setMenu] = useState(false);
+  const [askOut, setAskOut] = useState(false);
   const waiting = state?.stats.waiting ?? 0;
   const problems = state?.health?.problems.length ?? 0;
   const isOn = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
   // Asked first: it sits in the bar you use all day, and signing out by accident is pure annoyance.
   const signOut = async () => {
-    if (!confirm("Sign out of GAC Desk?")) return;
     await fetch("/api/auth/logout", { method: "POST" });
     location.href = "/login";
   };
@@ -75,7 +76,7 @@ export default function TopNav() {
             <Reminders />
             {/* Sign out in the bar itself: it used to be hidden behind the avatar, where nobody looked. */}
             <button
-              onClick={signOut}
+              onClick={() => (setMenu(false), setAskOut(true))}
               title="Sign out"
               className="hidden h-9 shrink-0 items-center gap-1.5 rounded-xl border border-[var(--line-2)] bg-white px-3 text-[13px] text-[var(--ink-2)] transition hover:border-[#f0cfcf] hover:bg-[#fdecec] hover:text-[var(--red)] md:inline-flex"
             >
@@ -89,7 +90,7 @@ export default function TopNav() {
                 <div className="pop-in absolute right-0 top-11 w-44 rounded-xl border border-[var(--line)] bg-white p-1 shadow-lg">
                   <button
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] transition hover:bg-[#fdecec] hover:text-[var(--red)]"
-                    onClick={signOut}
+                    onClick={() => (setMenu(false), setAskOut(true))}
                   >
                     <LogOut size={14} /> Sign out
                   </button>
@@ -99,6 +100,17 @@ export default function TopNav() {
           </div>
         </div>
       </header>
+
+      <Confirm
+        open={askOut}
+        Icon={LogOut}
+        title="Sign out of GAC Desk?"
+        message="You'll need your email and password to get back in."
+        confirmLabel="Sign out"
+        cancelLabel="Stay signed in"
+        onCancel={() => setAskOut(false)}
+        onConfirm={signOut}
+      />
 
       {/* Phone tab bar */}
       {/* One column per link: it was fixed at 5 while the list had already grown past that, which

@@ -1,6 +1,8 @@
 "use client";
+import { useState } from "react";
 import Link from "next/link";
 import { LogOut } from "lucide-react";
+import Confirm from "@/components/Confirm";
 
 // The one bar across the team side, so the update form and the WhatsApp chats read as two parts of
 // the same system rather than two unrelated pages. Each button only appears if that login may open
@@ -16,12 +18,12 @@ export type TeamTab = "form" | "chats" | "work";
 // Asked first: it sits next to the buttons people use all day, and signing out by accident means
 // finding the password again.
 export const signOut = async () => {
-  if (!confirm("Sign out of GAC Desk?")) return;
   await fetch("/api/auth/logout", { method: "POST" });
   location.href = "/login";
 };
 
 export default function TeamNav({ name, can, active, onTab }: { name?: string; can: TeamCan; active: TeamTab; onTab?: (t: "chats" | "work") => void }) {
+  const [askOut, setAskOut] = useState(false);
   const items: { key: TeamTab; label: string; href: string; show: boolean }[] = [
     { key: "form", label: "Send update", href: "/form", show: can.form },
     { key: "chats", label: "WhatsApp", href: "/portal", show: can.portal },
@@ -58,11 +60,22 @@ export default function TeamNav({ name, can, active, onTab }: { name?: string; c
         {name}
         <button
           className="inline-flex items-center gap-1.5 rounded-lg border border-transparent px-2.5 py-1 transition hover:border-[#f0cfcf] hover:bg-[#fdecec] hover:text-[var(--red)]"
-          onClick={signOut}
+          onClick={() => setAskOut(true)}
         >
           <LogOut size={14} /> Sign out
         </button>
       </span>
+
+      <Confirm
+        open={askOut}
+        Icon={LogOut}
+        title="Sign out of GAC Desk?"
+        message="You'll need your email and password to get back in."
+        confirmLabel="Sign out"
+        cancelLabel="Stay signed in"
+        onCancel={() => setAskOut(false)}
+        onConfirm={signOut}
+      />
     </div>
   );
 }
