@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { Sparkles } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ExternalLink, Sparkles } from "lucide-react";
 import { api, useLive, type DraftRow } from "@/components/Live";
 import { Avatar, Pill, ago } from "@/components/ui";
 import FromPicker from "@/components/FromPicker";
@@ -49,6 +49,8 @@ export default function DraftCard({ d, now, inThread = false }: { d: DraftRow; n
   }
 
   const ready = mode === "reply" ? !!d.conv_id : !!target;
+  // Trailing punctuation is left out of the link: "see https://x.com/a." is a link and a full stop.
+  const links = useMemo(() => [...new Set((text.match(/https?:\/\/[^\s<>"']+/g) ?? []).map((u) => u.replace(/[).,;:!?\]]+$/, "")))], [text]);
 
   return (
     <div className={inThread ? "rounded-2xl border border-dashed border-[var(--line-2)] bg-[var(--bg)] p-4" : "py-4"}>
@@ -61,6 +63,26 @@ export default function DraftCard({ d, now, inThread = false }: { d: DraftRow; n
         {d.project && <Pill>{d.project}</Pill>}
       </div>
       <textarea className="input min-h-[64px] resize-none text-[13.5px] leading-relaxed" rows={3} value={text} onChange={(e) => setText(e.target.value)} />
+      {/* The update stays editable, so it lives in a textarea, where a link is just characters. Any
+          link in it is listed here as well, to be opened and checked before the update is approved. */}
+      {links.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]">
+          <span className="text-[var(--muted)]">{links.length > 1 ? "Links" : "Link"}:</span>
+          {links.map((u) => (
+            <a
+              key={u}
+              href={u}
+              target="_blank"
+              rel="noreferrer"
+              title={u}
+              className="inline-flex max-w-[260px] items-center gap-1 truncate text-[var(--blue)] underline underline-offset-2 hover:opacity-80"
+            >
+              <ExternalLink size={12} className="shrink-0" />
+              <span className="truncate">{u.replace(/^https?:\/\//, "")}</span>
+            </a>
+          ))}
+        </div>
+      )}
       <div className="mt-2 flex gap-1.5">
         <input
           className="input !h-8 !py-0 text-[13px]"
