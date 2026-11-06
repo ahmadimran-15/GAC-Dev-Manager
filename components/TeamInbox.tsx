@@ -22,7 +22,14 @@ interface Thread {
 }
 
 const time = (t: number) => new Date(t).toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit" });
-const get = (url: string) => fetch(url, { cache: "no-store" }).then((r) => (r.status === 401 ? ((location.href = "/login"), null) : r.json()));
+// 401 means signed out, 403 means the owner has just taken this half away — either way the page
+// should not sit there showing what it loaded a minute ago.
+const get = (url: string) =>
+  fetch(url, { cache: "no-store" }).then((r) => {
+    if (r.status === 401) return ((location.href = "/login"), null);
+    if (r.status === 403) return ((location.href = "/form"), null);
+    return r.json();
+  });
 
 // Team portal → WhatsApp: the client chats without any numbers, and replies that go to the manager for approval.
 export default function TeamInbox() {

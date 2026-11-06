@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { get } from "@/lib/db";
 import { board, taskStatuses } from "@/lib/clickup";
-import { currentUser } from "@/lib/auth";
+import { currentUser, requireTeam } from "@/lib/auth";
 import { mayOpen } from "@/lib/session";
 import { addDraft } from "@/lib/store";
 import { taskConversation } from "@/lib/taskchat";
@@ -19,7 +19,8 @@ const MAX_TEXT = 4000;
 const PER_HOUR = 20; // updates an hour from the whole form, so a public page can't flood the inbox
 
 export async function GET(req: Request) {
-  const me = await currentUser();
+  const { user: me, deny } = await requireTeam("form");
+  if (deny) return deny;
   if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
 
   // ?task=<id> → the statuses that task can move to, so the team can ask for one with their update.
@@ -48,7 +49,8 @@ export async function GET(req: Request) {
 
 // { project, taskId, text }
 export async function POST(req: Request) {
-  const me = await currentUser();
+  const { user: me, deny } = await requireTeam("form");
+  if (deny) return deny;
   if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   const b = await req.json().catch(() => ({}));
   const text = String(b.text ?? "").trim();

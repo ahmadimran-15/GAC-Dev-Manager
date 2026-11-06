@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { all, get } from "@/lib/db";
-import { currentUser } from "@/lib/auth";
+import { currentUser, requireTeam } from "@/lib/auth";
 import { mayOpen } from "@/lib/session";
 import { addDraft } from "@/lib/store";
 import { board } from "@/lib/clickup";
@@ -15,6 +15,8 @@ const RATE_LIMIT = 30; // client updates per hour per person
 // Team portal: current projects, client first names (never numbers or emails), your own submissions,
 // and your ClickUp tasks with a start/stop timer (stamped by the server clock).
 export async function GET() {
+  const { deny: noAccess } = await requireTeam("portal");
+  if (noAccess) return noAccess;
   const me = await currentUser();
   if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   const [b, clients, mine, user, running, tracked, timersOn] = await Promise.all([
@@ -52,6 +54,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const { deny: noAccess } = await requireTeam("portal");
+  if (noAccess) return noAccess;
   const me = await currentUser();
   if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   const b = await req.json().catch(() => ({}));

@@ -51,7 +51,8 @@ export default function Portal() {
 
   const load = () =>
     fetch("/api/portal", { cache: "no-store" })
-      .then((r) => (r.status === 401 ? (location.href = "/login") : r.json()))
+      // 403: the owner has just taken this side away, so leave rather than show stale data.
+      .then((r) => (r.status === 401 ? (location.href = "/login") : r.status === 403 ? (location.href = "/form") : r.json()))
       .then((d) => d && setInfo(d));
 
   useEffect(() => {
