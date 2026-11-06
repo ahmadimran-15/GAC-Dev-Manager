@@ -114,3 +114,39 @@ export async function discordReach(accountId: string) {
     channels: [...gld.channels.cache.values()].filter((c) => c.isTextBased?.()).map((c) => `#${c.name}`),
   }));
 }
+
+// ---------- Webhook channels ----------
+
+// A Discord webhook is a URL a channel admin creates in one minute: anyone holding it can post into
+// that channel, with no app to authorise and no permissions to weigh up. It is one-way — a webhook
+// can never read anything — so these channels can be written to and never appear with incoming
+// messages. For a client's server, where nobody will install your bot, it is the whole answer.
+
+export const WEBHOOK_PREFIX = "webhook:";
+export const isWebhookChannel = (externalId: string) => externalId.startsWith(WEBHOOK_PREFIX);
+
+const DISCORD_HOST = /^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\//i;
+export const looksLikeWebhook = (url: string) => DISCORD_HOST.test(url.trim());
+
+export async function sendDiscordWebhook(url: string, text: string, username?: string) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    // allowed_mentions off by default: a stray @everyone in a drafted reply should not ping a client's
+    // whole server.
+    body: JSON.stringify({ content: text.slice(0, 2000), ...(username ? { username } : {}), allowed_mentions: { parse: [] } }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (res.status === 204 || res.ok) return { ok: true as const };
+  const body = await res.text().catch(() => "");
+  if (res.status === 401 || res.status === 404) return { ok: false as const, error: "That webhook no longer exists — the channel admin may have deleted it." };
+  return { ok: false as const, error: `Discord refused it (${res.status}) ${body.slice(0, 120)}`.trim() };
+}
+
+// The webhook behind a conversation whose external id is webhook:<accountId>.
+export async function webhookFor(externalId: string, accountId?: string | null) {
+  const id = externalId.slice(WEBHOOK_PREFIX.length) || accountId || "";
+  const list = await accountsWithSecrets("discord", false);
+  const a = list.find((x) => x.id === id) ?? list.find((x) => x.provider === "discord-webhook");
+  return a?.provider === "discord-webhook" ? a : null;
+}

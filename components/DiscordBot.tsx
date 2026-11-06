@@ -10,6 +10,7 @@ interface Acc {
   id: string;
   label: string;
   status: { ok: boolean; at: number; error?: string } | null;
+  webhook?: boolean;
   servers: { server: string; channels: string[] }[];
 }
 
@@ -17,7 +18,27 @@ export default function DiscordBot() {
   const { toast, refresh } = useLive();
   const [accounts, setAccounts] = useState<Acc[] | null>(null);
   const [token, setToken] = useState("");
+  const [hook, setHook] = useState("");
+  const [hookLabel, setHookLabel] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Saved only once a test message has actually landed in the channel, so a mistyped URL is caught
+  // here rather than the first time something important needed to go out.
+  const addHook = async () => {
+    setBusy(true);
+    try {
+      await api("/api/discord", { webhook: hook, label: hookLabel || "Discord channel" });
+      toast(`${hookLabel || "Channel"} connected — check Discord for the test message`);
+      setHook("");
+      setHookLabel("");
+      await load();
+      refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Discord refused that webhook", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const load = () => api<{ accounts: Acc[] }>("/api/discord").then((r) => setAccounts(r.accounts ?? [])).catch(() => setAccounts([]));
   useEffect(() => {
@@ -69,7 +90,9 @@ export default function DiscordBot() {
                 <Trash2 size={14} />
               </button>
             </div>
-            {a.servers.length > 0 ? (
+            {a.webhook ? (
+              <p className="mt-1 text-[12.5px] text-[var(--muted)]">Webhook — posts into this channel only; nothing comes back.</p>
+            ) : a.servers.length > 0 ? (
               <div className="mt-1 text-[12.5px] text-[var(--muted)]">
                 {a.servers.map((s) => (
                   <div key={s.server} className="truncate">
@@ -86,7 +109,32 @@ export default function DiscordBot() {
         {accounts !== null && !accounts.length && <p className="py-2.5 text-[13px] text-[var(--muted)]">No Discord bot connected yet.</p>}
       </div>
 
+      <div className="border-t border-[var(--line)] py-3">
+        <p className="mb-2 text-[12.5px] text-[var(--muted)]">
+          <b>Webhook</b> — for a server you don&apos;t administer. The channel&apos;s admin makes one in a minute (right-click the channel → Edit Channel → Integrations →
+          Webhooks → New Webhook → Copy URL) and sends you the URL. It can post into that channel and nothing else: no messages come back, so there is nothing to answer in
+          the inbox. Treat the URL as a secret — anyone holding it can post there.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input className="input !h-8 !w-[150px] !py-0 text-[13px]" placeholder="Channel name" value={hookLabel} onChange={(e) => setHookLabel(e.target.value)} />
+          <input
+            className="input !py-1.5 min-w-[220px] flex-1"
+            type="password"
+            autoComplete="off"
+            placeholder="https://discord.com/api/webhooks/…"
+            value={hook}
+            onChange={(e) => setHook(e.target.value)}
+          />
+          <button className="btn btn-dark btn-sm shrink-0" disabled={busy || !hook.trim()} onClick={addHook}>
+            Add channel
+          </button>
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2 border-t border-[var(--line)] py-3">
+        <p className="w-full text-[12.5px] text-[var(--muted)]">
+          <b>Bot</b> — for a server you can get the bot invited to. It reads the channels it is in, so those conversations arrive in the inbox and can be answered.
+        </p>
         <input className="input !py-1.5 min-w-[260px] flex-1" type="password" autoComplete="off" placeholder="Bot token from the Discord developer portal" value={token} onChange={(e) => setToken(e.target.value)} />
         <button className="btn btn-dark btn-sm shrink-0" disabled={busy || !token.trim()} onClick={add}>
           Connect bot

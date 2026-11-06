@@ -17,6 +17,7 @@ export async function GET() {
       label: a.label,
       address: a.address,
       status: a.status,
+      webhook: a.provider === "discord-webhook",
       servers: reach.find((r) => r.id === a.id)?.servers ?? [],
     })),
   });
@@ -37,6 +38,21 @@ export async function POST(req: Request) {
   if (b.action === "reconnect") {
     await syncDiscord();
     return NextResponse.json({ ok: true });
+  }
+
+  // A webhook URL instead of a bot: send-only, into a channel somebody else administers.
+  if (b.webhook !== undefined) {
+    const url = String(b.webhook ?? "").trim();
+    const { looksLikeWebhook, sendDiscordWebhook, WEBHOOK_PREFIX } = await import("@/lib/discord");
+    if (!looksLikeWebhook(url)) return NextResponse.json({ error: "That is not a Discord webhook URL — it should start https://discord.com/api/webhooks/" }, { status: 400 });
+    const label = String(b.label ?? "").trim() || "Discord channel";
+    // Prove it works before saving it, so a mistyped URL is caught here and not at 9 pm on a Sunday.
+    const test = await sendDiscordWebhook(url, `✅ ${label} is connected to GAC Desk.`, label);
+    if (!test.ok) return NextResponse.json({ error: test.error }, { status: 400 });
+    const id = await addAccount({ kind: "discord", label, address: "webhook", provider: "discord-webhook", config: {}, secret: url, canSend: true });
+    const { findOrCreateConversation } = await import("@/lib/store");
+    const conv = await findOrCreateConversation({ channel: "discord", externalId: `${WEBHOOK_PREFIX}${id}`, account: id, name: label });
+    return NextResponse.json({ ok: true, id, conversation: conv.id });
   }
 
   const token = String(b.token ?? "").trim();

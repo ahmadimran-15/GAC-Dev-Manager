@@ -325,10 +325,17 @@ async function sendOnceTo(convId: string, text: string, opts: { ack?: boolean; b
     r = { ok: true, id: p?.id ? `cu_${p.id}` : undefined };
     via = "ClickUp";
   } else if (c.channel === "discord") {
-    // Goes out as the bot: Discord has no way for an app to post as a person.
-    const { sendDiscord } = await import("@/lib/discord");
-    r = await sendDiscord(c.account, c.external_id, text);
-    via = "Discord";
+    const d = await import("@/lib/discord");
+    if (d.isWebhookChannel(c.external_id)) {
+      // A webhook channel: one-way into a client's server, no bot and nothing to authorise.
+      const a = await d.webhookFor(c.external_id, c.account);
+      r = a ? await d.sendDiscordWebhook(a.secret, text, a.label) : { ok: false, error: "That Discord webhook is no longer set up in Settings" };
+      via = a?.label ? `Discord · ${a.label}` : "Discord";
+    } else {
+      // The bot: goes out as the app, since Discord has no way for one to post as a person.
+      r = await d.sendDiscord(c.account, c.external_id, text);
+      via = "Discord";
+    }
   } else if (c.channel === "slack") {
     // Sent with your own user token, so it arrives from you in Slack rather than from an app.
     const { sendSlack } = await import("@/lib/slack");
