@@ -4,7 +4,7 @@ import { decrypt, encrypt } from "@/lib/crypto";
 // Every place clients can reach the company: mailboxes (yours, info@, dev@, each teammate's) and
 // WhatsApp numbers. Added from Settings; passwords and keys are stored encrypted.
 
-export type AccountKind = "email" | "whatsapp";
+export type AccountKind = "email" | "whatsapp" | "slack";
 
 export interface AccountConfig {
   imapHost?: string;

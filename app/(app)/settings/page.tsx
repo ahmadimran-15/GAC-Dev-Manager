@@ -9,6 +9,7 @@ import HealthPanel from "@/components/HealthPanel";
 import GroupsManager from "@/components/GroupsManager";
 import ScheduledMessages from "@/components/ScheduledMessages";
 import MailFilter from "@/components/MailFilter";
+import SlackAccounts from "@/components/SlackAccounts";
 import TimeTrackingSettings from "@/components/TimeTrackingSettings";
 import CurrentProjects from "@/components/CurrentProjects";
 import { ago } from "@/components/ui";
@@ -200,9 +201,11 @@ export default function Settings() {
         {!k?.publicUrl && " · set PUBLIC_URL in .env to register it"}
       </div>
 
+      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Slack</h2>
+      <SlackAccounts />
+
       <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">More channels</h2>
       <div className="card divide-y divide-[var(--line)] px-5">
-        <Row name="Slack" ok={null} detail="Needs a Slack app (bot + user token). There is no QR login for Slack. I'll connect it once you create the app." />
         <Row name="Microsoft Teams & Outlook" ok={null} detail="Needs one Azure app registration (Sign in with Microsoft). Outlook no longer allows plain password login." />
       </div>
         </>

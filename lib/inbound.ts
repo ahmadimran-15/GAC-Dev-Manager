@@ -295,7 +295,12 @@ async function sendOnceTo(convId: string, text: string, opts: { ack?: boolean; b
     const p = await postComment(c.external_id, text, true);
     r = { ok: true, id: p?.id ? `cu_${p.id}` : undefined };
     via = "ClickUp";
-  } else r = { ok: true, simulated: true }; // Slack / Teams / Outlook connect later
+  } else if (c.channel === "slack") {
+    // Sent with your own user token, so it arrives from you in Slack rather than from an app.
+    const { sendSlack } = await import("@/lib/slack");
+    r = await sendSlack(c.account, c.external_id, text);
+    via = "Slack";
+  } else r = { ok: true, simulated: true }; // Teams / Outlook connect later
   if (!r.ok) throw new Error(r.error ?? "Send failed");
   await addMessage({ conv_id: convId, direction: "out", text, ack: opts.ack ? 1 : 0, sent_by: opts.by ?? "me", status: r.simulated ? "simulated" : "sent", external_id: r.id ?? null, via });
   await updateConversation(convId, { suggestion: null, suggestion_for: null, reminded_at: null });
@@ -489,6 +494,23 @@ export function startWorker() {
   setInterval(() => watchSessions().catch((e) => log("backfill-error", String(e))), 120_000);
 
   log("ai-hours", { background: aiHoursLabel(), now: aiHoursNow() ? "on" : "off" });
+
+  // Slack DMs, polled like the mailboxes: no public URL for Slack to verify, and nothing is missed
+  // while the server sleeps — the next pass picks up whatever arrived meanwhile.
+  const slack = async () => {
+    const { slackAccounts, pollSlack } = await import("@/lib/slack");
+    for (const a of await slackAccounts()) {
+      try {
+        const n = await pollSlack(a, (convId) => afterIncoming(convId));
+        if (n) log("slack", { account: a.label, stored: n });
+      } catch (e) {
+        log("slack-error", { account: a.label, error: String(e) });
+        await (await import("@/lib/accounts")).setAccountStatus(a.id, false, String(e));
+      }
+    }
+  };
+  setTimeout(() => slack().catch(() => {}), 10_000);
+  setInterval(() => slack().catch((e) => log("slack-error", String(e))), 60_000);
 
   // Scheduled group messages (Settings → Scheduled messages). Checked every minute; each one goes
   // once a day, marked in kv, so a restart at noon never re-sends the 11 am one.
