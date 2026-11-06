@@ -7,6 +7,7 @@ import { reminderSettings } from "@/components/Reminders";
 import AccountsManager from "@/components/AccountsManager";
 import HealthPanel from "@/components/HealthPanel";
 import GroupsManager from "@/components/GroupsManager";
+import ScheduledMessages from "@/components/ScheduledMessages";
 import TimeTrackingSettings from "@/components/TimeTrackingSettings";
 import CurrentProjects from "@/components/CurrentProjects";
 import { ago } from "@/components/ui";
@@ -75,6 +76,7 @@ const TABS = [
   { id: "accounts", label: "Accounts" },
   { id: "ai", label: "AI & tasks" },
   { id: "groups", label: "Groups" },
+  { id: "schedule", label: "Scheduled messages" },
 ];
 
 export default function Settings() {
@@ -232,6 +234,8 @@ export default function Settings() {
       )}
 
       {tab === "groups" && <GroupsManager />}
+
+      {tab === "schedule" && <ScheduledMessages />}
 
       {/* Logins, team numbers and what the team may see now live on their own page: this one was
           long enough that adding a teammate meant scrolling past everything above. */}

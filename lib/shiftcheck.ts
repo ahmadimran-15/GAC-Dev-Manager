@@ -27,7 +27,10 @@ Answer with ONLY a JSON object and nothing else, no code fence:
 "eod" (end of day) = clocking OUT, a timer showing hours already worked, or a sent email whose subject says "EOD Report".
 "proof" is "timer" for the timekeeping timer page, "email" for a mailbox screenshot, "other" for anything else.
 Read the date from whatever is visible: the email subject (a date like 11/03/26 is 3 November 2026), the Windows taskbar clock, or the page itself. Use null if no date is visible.
-If the picture is not about starting or ending a shift — a chat, a Slack message, a document — use "unknown" for shift.`;
+If the picture is not about starting or ending a shift — a chat, a Slack message, a document — use "unknown" for shift.
+
+Answer with the JSON object only. Never apologise, never explain, never say you cannot see the image.
+If you genuinely cannot read it, still answer with JSON: {"shift":"unknown","date":null,"clock":null,"elapsed":null,"proof":"other","detail":"unreadable"}`;
 
 // Which chats this runs in: the group by name, plus anything added for testing. Matched on the
 // conversation name or its WhatsApp id/number, so a direct chat can be used to try it out.
@@ -64,8 +67,8 @@ export async function watchesShiftCheck(c: Pick<Conversation, "name" | "external
 export async function classifyShift(image: Buffer, mime: string): Promise<Shift> {
   let raw = "";
   let parsed: Partial<Shift> | null = null;
-  for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
-    if (attempt) await new Promise((r) => setTimeout(r, 2500));
+  for (let attempt = 0; attempt < 4 && !parsed; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, attempt * 4000));
     raw = await readImage(image, mime, PROMPT);
     const json = raw.replace(/```json|```/g, "").trim();
     const start = json.indexOf("{");
@@ -250,12 +253,20 @@ export function checkShiftImage(conv: Conversation, messageId: string, image: Bu
   return queued(conv.id, () => runShiftCheck(conv, messageId, image, mime, at));
 }
 
-async function runShiftCheck(conv: Conversation, messageId: string, image: Buffer, mime: string, at: number) {
+// How long to keep trying when the server itself is having a bad moment. The end-of-day proof can
+// land at 1 am or 3 am and still has to be answered, so a failure waits and goes again rather than
+// being dropped until someone presses Check in the morning.
+const LATER = [60_000, 5 * 60_000, 15 * 60_000];
+
+async function runShiftCheck(conv: Conversation, messageId: string, image: Buffer, mime: string, at: number, round = 0): Promise<{ checked: boolean; error?: string; shift?: Shift; replied?: string | false }> {
   let s: Shift;
   try {
     s = await shiftFor(messageId, image, mime);
   } catch (e) {
-    await logEvent("shift-check-error", { conv: conv.id, message: messageId, error: String(e) });
+    const wait = LATER[round];
+    await logEvent("shift-check-error", { conv: conv.id, message: messageId, error: String(e), retryIn: wait ? `${wait / 60000}m` : "giving up" });
+    if (!wait) return { checked: false, error: String(e) };
+    setTimeout(() => void queued(conv.id, () => runShiftCheck(conv, messageId, image, mime, at, round + 1)), wait);
     return { checked: false, error: String(e) };
   }
   if (s.shift === "unknown") {

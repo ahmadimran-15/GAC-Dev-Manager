@@ -490,6 +490,14 @@ export function startWorker() {
 
   log("ai-hours", { background: aiHoursLabel(), now: aiHoursNow() ? "on" : "off" });
 
+  // Scheduled group messages (Settings → Scheduled messages). Checked every minute; each one goes
+  // once a day, marked in kv, so a restart at noon never re-sends the 11 am one.
+  const scheduled = async () => {
+    const r = await (await import("@/lib/schedules")).runSchedules();
+    if (r.sent) log("schedules", r);
+  };
+  setInterval(() => scheduled().catch((e) => log("schedule-error", String(e))), 60_000);
+
   // After a restart, draft replies for anyone still waiting without one (office hours only, and a
   // restart at 3 am used to redraft the whole backlog in one go)
   setTimeout(async () => {
