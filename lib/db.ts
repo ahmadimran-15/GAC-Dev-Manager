@@ -58,6 +58,7 @@ create table if not exists messages (
   transcript text,
   media_path text,
   media_mime text,
+  reaction text,
   external_id text,
   ack integer not null default 0,
   sent_by text,
@@ -216,6 +217,7 @@ const SQLITE_MIGRATIONS: [table: string, column: string, type: string][] = [
   ["drafts", "sent_to", "text"],
   ["drafts", "task_status", "text"],
   ["users", "wa_accounts", "text"],
+  ["messages", "reaction", "text"],
   ["users", "clickup_name", "text"],
   ["conversations", "remind_after", "integer"],
   ["conversations", "internal", "integer not null default 0"],
@@ -235,6 +237,8 @@ const PG_MIGRATIONS = [
   "alter table users add column if not exists can_form integer not null default 1",
   // Which WhatsApp numbers this login may see in the portal; empty means the shared setting.
   "alter table users add column if not exists wa_accounts text",
+  // The emoji we put on a message, so the thread shows it the way WhatsApp does.
+  "alter table messages add column if not exists reaction text",
   "alter table conversations add column if not exists remind_after integer",
   "alter table conversations add column if not exists internal integer not null default 0",
   // Newsletters, receipts and service mail: kept, filed under Updates, never counted as waiting.

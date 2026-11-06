@@ -603,3 +603,47 @@ export async function sessionQr(a: AccountWithSecret) {
   const r = await wa<any>(a, "/qr");
   return String(r?.qr ?? r?.qrCode ?? r?.data?.qr ?? r?.image ?? r?.base64 ?? "");
 }
+
+// ---------- Media out, and reactions ----------
+
+// The gateway takes the file itself as base64 with its mime type, so nothing has to be hosted
+// anywhere public first. One request, like send-text: never re-sent on a timeout, because a slow
+// answer is not the same as a failed send and a retry used to double-post.
+export async function sendWhatsAppMedia(
+  accountId: string | null | undefined,
+  to: string,
+  file: { buf: Buffer; mime: string; name?: string },
+  opts: { caption?: string; quotedMessageId?: string | null } = {},
+): Promise<{ ok: boolean; simulated?: boolean; id?: string; error?: string; uncertain?: boolean }> {
+  const a = await pick(accountId);
+  if (!a) return { ok: true, simulated: true };
+  const route = file.mime.startsWith("image/") && !file.mime.includes("svg") ? "send-image" : file.mime.startsWith("video/") ? "send-video" : file.mime.startsWith("audio/") ? "send-audio" : "send-document";
+  const body = {
+    chatId: chatIdFor(to),
+    base64: file.buf.toString("base64"),
+    mimetype: file.mime,
+    filename: file.name || "file",
+    ...(opts.caption ? { caption: opts.caption } : {}),
+    ...(opts.quotedMessageId ? { quotedMessageId: opts.quotedMessageId } : {}),
+  };
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = await wa<any>(a, `/messages/${route}`, { method: "POST", body: JSON.stringify(body) }, 180_000);
+    return { ok: true, id: String(r?.messageId ?? r?.waMessageId ?? r?.id ?? "") || undefined };
+  } catch (e) {
+    if (!(e instanceof GatewayError)) return { ok: false, uncertain: true, error: "WhatsApp is slow to confirm. It may still have gone: check the chat before sending again." };
+    return { ok: false, error: e.message };
+  }
+}
+
+// Add or remove a reaction. An empty emoji takes ours off again.
+export async function reactWhatsApp(accountId: string | null | undefined, chatId: string, messageId: string, emoji: string) {
+  const a = await pick(accountId);
+  if (!a) return { ok: true as const, simulated: true as const };
+  try {
+    await wa(a, "/messages/react", { method: "POST", body: JSON.stringify({ chatId: chatIdFor(chatId), messageId, emoji }) }, 60_000);
+    return { ok: true as const };
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : "Could not react" };
+  }
+}

@@ -80,7 +80,49 @@ function ShiftCheck({ convId }: { convId: string }) {
   );
 }
 
-function Transcribe({ id, dark, onDone }: { id: string; dark: boolean; onDone: () => void }) {
+// The six WhatsApp offers you, plus a way to take it off again by tapping the same one.
+const EMOJI = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
+function React_({ id, reaction, onDone }: { id: string; reaction: string | null; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const { toast } = useLive();
+  const put = async (emoji: string) => {
+    setBusy(true);
+    setOpen(false);
+    try {
+      await api(`/api/messages/${id}/react`, { emoji });
+      onDone();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not react", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="relative inline-flex items-center">
+      <button
+        className={`rounded-full px-1.5 py-0.5 text-[12px] transition hover:bg-[var(--hover)] ${reaction ? "" : "opacity-0 group-hover:opacity-100"}`}
+        disabled={busy}
+        title={reaction ? "Change or remove the reaction" : "React"}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {reaction || "🙂"}
+      </button>
+      {open && (
+        <span className="pop-in absolute bottom-6 left-0 z-20 flex gap-0.5 rounded-full border border-[var(--line)] bg-white p-1 shadow-lg">
+          {EMOJI.map((e) => (
+            <button key={e} className={`rounded-full px-1.5 py-0.5 text-[15px] hover:bg-[var(--hover)] ${e === reaction ? "bg-[var(--bg)]" : ""}`} onClick={() => put(e)}>
+              {e}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function Transcribe({ id, dark, onDone, picture = false }: { id: string; dark: boolean; onDone: () => void; picture?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   if (err)
@@ -99,17 +141,17 @@ function Transcribe({ id, dark, onDone }: { id: string; dark: boolean; onDone: (
       onClick={async () => {
         setBusy(true);
         try {
-          await api(`/api/messages/${id}/transcribe`, {});
+          await api(`/api/messages/${id}/${picture ? "read" : "transcribe"}`, {});
           onDone();
         } catch (e) {
-          setErr(e instanceof Error ? e.message : "Couldn't transcribe it");
+          setErr(e instanceof Error ? e.message : picture ? "Couldn't read it" : "Couldn't transcribe it");
         } finally {
           setBusy(false);
         }
       }}
     >
       {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-      {busy ? "Reading the voice note…" : "Transcribe"}
+      {busy ? (picture ? "Reading the picture…" : "Reading the voice note…") : picture ? "Read this picture" : "Transcribe"}
     </button>
   );
 }
@@ -180,6 +222,7 @@ function Inbox({ side }: { side: "client" | "team" }) {
   const [drawer, setDrawer] = useState(false);
   const [board, setBoard] = useState<BoardLite | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const filePick = useRef<HTMLInputElement>(null);
 
   const isGroup = (c: ConvSummary) => c.channel === "whatsapp" && c.externalId.endsWith("@g.us");
   const updatesCount = (state?.conversations ?? []).filter((c) => c.bulk && c.audience === side).length;
@@ -225,11 +268,11 @@ function Inbox({ side }: { side: "client" | "team" }) {
   // Which chat is open is held here, not in the router. router.replace made Next fetch the page
   // again for every chat you clicked, which showed the loading screen and read as a refresh. The
   // address bar is still kept in step, so a link to a chat works and so does the browser's Back.
-  const [picked, setPicked] = useState<string | null>(null);
+  const [openChatId, setOpenChatId] = useState<string | null>(null);
   const urlC = params.get('c');
-  const id = picked ?? urlC ?? convs[0]?.id ?? null;
+  const id = openChatId ?? urlC ?? convs[0]?.id ?? null;
   const openChat = (next: string | null) => {
-    setPicked(next);
+    setOpenChatId(next);
     try {
       window.history.replaceState(null, '', sideUrl(next ?? undefined));
     } catch {
@@ -237,7 +280,7 @@ function Inbox({ side }: { side: "client" | "team" }) {
     }
   };
   // Phone: one pane at a time, the list until a chat is tapped, then the chat with a back arrow
-  const chosen = !!(picked ?? urlC);
+  const chosen = !!(openChatId ?? urlC);
   const now = state?.now ?? Date.now();
 
   // Opening a chat marks it as seen up to its latest message
@@ -275,7 +318,7 @@ function Inbox({ side }: { side: "client" | "team" }) {
   // A link from elsewhere (a reminder, the overview) changes ?c= — let that win over the last
   // chat clicked here.
   useEffect(() => {
-    setPicked(null);
+    setOpenChatId(null);
   }, [urlC]);
 
   useEffect(() => {
@@ -686,15 +729,23 @@ function Inbox({ side }: { side: "client" | "team" }) {
                               <Paperclip size={13} /> Open the file
                             </a>
                           )}
-                          {body ? <MessageText text={body} dark={mine && !m.ack} /> : m.kind === "voice" ? <Transcribe id={m.id} dark={mine && !m.ack} onDone={load} /> : null}
+                          {body ? <MessageText text={body} dark={mine && !m.ack} /> : null}
+                          {/* A picture gets the same offer a voice note does: read it only when asked. */}
+                          {!m.transcript && (m.kind === "voice" || m.kind === "image") && <Transcribe id={m.id} dark={mine && !m.ack} onDone={load} picture={m.kind === "image"} />}
                         </div>
-                        <div className="mt-1 px-1 text-[11px] text-[var(--muted)]">
+                        <div className="group mt-1 flex items-center px-1 text-[11px] text-[var(--muted)]">
                           {mine && m.ack ? "Acknowledged · " : ""}
                           {mine && m.sent_by && m.sent_by !== "me" ? `${m.sent_by === "phone" ? "From your phone" : `Written by ${m.sent_by}`} · ` : ""}
                           {m.via && !byTeammate ? `${c.channel === "clickup" ? "on" : mine ? "from" : "to"} ${m.via} · ` : ""}
                           {time(m.created_at)}
                           {m.status === "simulated" ? " · test mode" : ""}
                           {mine && c.channel === "whatsapp" && <Ticks status={m.status} />}
+                          {c.channel === "whatsapp" && m.external_id && (
+                            <>
+                              {" · "}
+                              <React_ id={m.id} reaction={m.reaction ?? null} onDone={load} />
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -745,6 +796,42 @@ function Inbox({ side }: { side: "client" | "team" }) {
                   <button className="btn btn-ghost btn-sm" disabled={busy || !reply.trim()} onClick={polish}>
                     <Sparkles size={13} /> Polish
                   </button>
+                  {/* Whatever is in the reply box goes with the file as its caption. */}
+                  {c.channel === "whatsapp" && (
+                    <>
+                      <input
+                        ref={filePick}
+                        type="file"
+                        className="hidden"
+                        accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.zip"
+                        onChange={async (e) => {
+                          const f = e.target.files?.[0];
+                          e.target.value = "";
+                          if (!f) return;
+                          setBusy(true);
+                          try {
+                            const body = new FormData();
+                            body.append("file", f);
+                            if (reply.trim()) body.append("caption", reply.trim());
+                            if (from) body.append("from", from);
+                            const res = await fetch(`/api/conversations/${c.id}/media`, { method: "POST", body });
+                            const d = await res.json().catch(() => null);
+                            if (!res.ok) throw new Error(d?.error ?? "Could not send the file");
+                            setReply("");
+                            toast(`Sent the ${d.kind === "image" ? "picture" : d.kind === "video" ? "video" : "file"}`);
+                            load();
+                          } catch (err) {
+                            toast(err instanceof Error ? err.message : "Could not send the file", "error");
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                      />
+                      <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => filePick.current?.click()} title="Send a picture, video or file">
+                        <Paperclip size={13} /> Attach
+                      </button>
+                    </>
+                  )}
                   <button className="btn btn-dark btn-sm ml-auto" disabled={busy || !reply.trim()} onClick={() => doSend(reply)}>
                     <Send size={13} /> Send
                   </button>

@@ -31,6 +31,7 @@ export interface Message {
   transcript: string | null;
   media_path: string | null;
   media_mime: string | null;
+  reaction: string | null; // the emoji we reacted with
   external_id: string | null;
   ack: number;
   sent_by: string | null;
