@@ -567,6 +567,29 @@ export function startWorker() {
   setInterval(() => discord().catch((e) => log("discord-error", String(e))), 5 * 60_000);
   setInterval(() => slack().catch((e) => log("slack-error", String(e))), 60_000);
 
+  // Every so often, make sure each connected number still has our webhook on it, pointing at this
+  // server. A number added without one — or left behind when the address changed — goes on looking
+  // connected while nothing arrives from it, and that is exactly how a client's reply gets lost.
+  const checkHooks = async () => {
+    const base = String(process.env.PUBLIC_URL ?? "").replace(/\/$/, "");
+    if (!base.startsWith("https://")) return;
+    const want = `${base}/api/webhooks/whatsapp`;
+    const { accountsWithSecrets } = await import("@/lib/accounts");
+    const { webhookHealth, registerWebhook } = await import("@/lib/whatsapp");
+    for (const a of await accountsWithSecrets("whatsapp")) {
+      try {
+        const h = await webhookHealth(a, want);
+        if (h.ok) continue;
+        await registerWebhook(a, want);
+        log("webhook-repaired", { number: a.label, was: h.found ?? "none", now: want });
+      } catch (e) {
+        log("webhook-check-error", { number: a.label, error: String(e) });
+      }
+    }
+  };
+  setTimeout(() => checkHooks().catch(() => {}), 30_000);
+  setInterval(() => checkHooks().catch((e) => log("webhook-check-error", String(e))), 15 * 60_000);
+
   // Scheduled group messages (Settings → Scheduled messages). Checked every minute; each one goes
   // once a day, marked in kv, so a restart at noon never re-sends the 11 am one.
   const scheduled = async () => {

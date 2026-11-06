@@ -654,3 +654,12 @@ export async function reactWhatsApp(accountId: string | null | undefined, chatId
     return { ok: false as const, error: e instanceof Error ? e.message : "Could not react" };
   }
 }
+
+// Is our webhook actually on this session, pointing where it should? A number with no webhook looks
+// perfectly healthy — connected, session ready — and simply never delivers a message, which is the
+// worst way for this to fail. Checked on a timer so it cannot stay broken quietly.
+export async function webhookHealth(a: AccountWithSecret, want: string) {
+  const list = await wa<{ id: string; url: string }[]>(a, "/webhooks");
+  const mine = list.find((w) => w.url.includes("/api/webhooks/whatsapp"));
+  return { ok: !!mine && mine.url === want, found: mine?.url ?? null, others: list.filter((w) => !w.url.includes("/api/webhooks/whatsapp")).length };
+}
