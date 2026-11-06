@@ -9,9 +9,11 @@ export default function FromPicker({ channel, account, value, onChange }: { chan
   const options = (state?.accounts ?? []).filter((a) => a.kind === channel && a.enabled && a.canSend);
   const fallback = accountOf(options, account)?.id ?? options[0]?.id ?? "";
 
+  // Follow the conversation. Without `account` here the previous chat's number stayed selected —
+  // it was still a valid option, so nothing reset it — and the reply went out from the wrong number.
   useEffect(() => {
-    if (!value || !options.some((o) => o.id === value)) onChange(fallback);
-  }, [fallback, options.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (fallback && fallback !== value) onChange(fallback);
+  }, [fallback, account]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (channel !== "email" && channel !== "whatsapp") return null;
   if (!options.length) return <span className="text-[12px] text-[var(--amber)]">No {channel === "email" ? "mailbox" : "WhatsApp number"} set up for sending. Add one in Settings.</span>;

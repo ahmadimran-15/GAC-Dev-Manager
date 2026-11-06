@@ -10,7 +10,7 @@ export async function GET(req: Request) {
   const me = await currentUser();
   if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   const convId = new URL(req.url).searchParams.get("c");
-  if (!convId) return NextResponse.json(await teamChats());
+  if (!convId) return NextResponse.json(await teamChats(me.id));
   const thread = await teamThread(convId, me.id);
   return thread ? NextResponse.json(thread) : NextResponse.json({ error: "Not found" }, { status: 404 });
 }

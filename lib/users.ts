@@ -16,6 +16,7 @@ export interface User {
   // Which halves of the team side this login may open. The owner always has both.
   canPortal: boolean; // the WhatsApp portal
   canForm: boolean; // the update form
+  waAccounts: string[]; // which WhatsApp numbers they see in the portal; empty = the shared setting
   lastLogin: number | null;
   createdAt: number;
 }
@@ -30,6 +31,7 @@ interface Row {
   clickup_name: string | null;
   can_portal: number | null;
   can_form: number | null;
+  wa_accounts: string | null;
   last_login: number | null;
   created_at: number;
 }
@@ -37,6 +39,15 @@ interface Row {
 // An older row has no access columns yet, so a missing value counts as allowed: nobody loses access
 // to something they could already open just because the column was added underneath them.
 const flag = (v: number | null | undefined) => v === null || v === undefined || !!v;
+
+const parseList = (v: string | null) => {
+  try {
+    const a = JSON.parse(v ?? "null");
+    return Array.isArray(a) ? a.map(String).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+};
 
 const toUser = (r: Row): User => ({
   id: r.id,
@@ -47,6 +58,7 @@ const toUser = (r: Row): User => ({
   clickupName: r.clickup_name ?? null,
   canPortal: r.role === "admin" || flag(r.can_portal),
   canForm: r.role === "admin" || flag(r.can_form),
+  waAccounts: parseList(r.wa_accounts),
   lastLogin: r.last_login ? Number(r.last_login) : null,
   createdAt: Number(r.created_at),
 });
@@ -113,7 +125,8 @@ export async function createUser(u: { email: string; name: string; role: Role; p
   return id;
 }
 
-export async function updateUser(id: string, f: { name?: string; active?: boolean; password?: string; role?: Role; clickupName?: string | null; canPortal?: boolean; canForm?: boolean }) {
+export async function updateUser(id: string, f: { name?: string; active?: boolean; password?: string; role?: Role; clickupName?: string | null; canPortal?: boolean; canForm?: boolean; waAccounts?: string[] }) {
+  if (f.waAccounts !== undefined) await run("update users set wa_accounts = ? where id = ?", JSON.stringify([...new Set((f.waAccounts ?? []).map(String))]), id);
   if (f.canPortal !== undefined) await run("update users set can_portal = ? where id = ?", f.canPortal ? 1 : 0, id);
   if (f.canForm !== undefined) await run("update users set can_form = ? where id = ?", f.canForm ? 1 : 0, id);
   if (f.password !== undefined) {

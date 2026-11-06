@@ -33,7 +33,7 @@ export async function POST(req: Request) {
         const target = await getUser(b.id);
         if (!target) return NextResponse.json({ error: "Login not found" }, { status: 404 });
         if (target.role === "admin" && (b.active === false || b.role === "team") && (await adminCount()) <= 1) return NextResponse.json({ error: "You can't remove the last owner login" }, { status: 400 });
-        await updateUser(b.id, { name: b.name, active: b.active, password: b.password || undefined, role: b.role, clickupName: b.clickupName, canPortal: b.canPortal, canForm: b.canForm });
+        await updateUser(b.id, { name: b.name, active: b.active, password: b.password || undefined, role: b.role, clickupName: b.clickupName, canPortal: b.canPortal, canForm: b.canForm, waAccounts: Array.isArray(b.waAccounts) ? b.waAccounts : undefined });
         return NextResponse.json({ ok: true });
       }
       case "delete": {

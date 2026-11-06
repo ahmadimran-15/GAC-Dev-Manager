@@ -58,8 +58,18 @@ const shortNames = async () => {
 // Chats with our own numbers (e.g. the reminders you get on WhatsApp) aren't client chats
 const ourOwn = async () => new Set((await waAccounts()).map((a) => a.address).filter(Boolean));
 
-export async function teamChats() {
-  const [names, own, allowed] = await Promise.all([shortNames(), ourOwn(), teamWaAccounts()]);
+// The numbers this person may see: their own list if the owner set one, otherwise the shared list.
+async function allowedFor(meId?: string) {
+  if (meId) {
+    const { getUser } = await import("@/lib/users");
+    const me = await getUser(meId).catch(() => null);
+    if (me?.waAccounts.length) return me.waAccounts;
+  }
+  return teamWaAccounts();
+}
+
+export async function teamChats(meId?: string) {
+  const [names, own, allowed] = await Promise.all([shortNames(), ourOwn(), allowedFor(meId)]);
   const list = (await listConversations()).filter((c) => c.channel === "whatsapp" && !c.internal && !c.demo && !own.has(c.externalId) && onTeamAccount(allowed, c.account));
   return {
     now: Date.now(),
@@ -79,7 +89,7 @@ export async function teamChats() {
 }
 
 export async function teamThread(convId: string, meId: string) {
-  const [names, own, allowed] = await Promise.all([shortNames(), ourOwn(), teamWaAccounts()]);
+  const [names, own, allowed] = await Promise.all([shortNames(), ourOwn(), allowedFor(meId)]);
   const c = await getConversation(convId);
   if (!c || c.channel !== "whatsapp" || c.internal || c.demo || own.has(c.external_id) || !onTeamAccount(allowed, c.account)) return null;
   const group = c.external_id.endsWith("@g.us");

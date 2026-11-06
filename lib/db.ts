@@ -88,6 +88,7 @@ create table if not exists users (
   active integer not null default 1,
   clickup_name text,
   can_portal integer not null default 1,
+  wa_accounts text,
   can_form integer not null default 1,
   last_login ${big},
   created_at ${big} not null
@@ -214,6 +215,7 @@ const SQLITE_MIGRATIONS: [table: string, column: string, type: string][] = [
   ["drafts", "author_id", "text"],
   ["drafts", "sent_to", "text"],
   ["drafts", "task_status", "text"],
+  ["users", "wa_accounts", "text"],
   ["users", "clickup_name", "text"],
   ["conversations", "remind_after", "integer"],
   ["conversations", "internal", "integer not null default 0"],
@@ -231,6 +233,8 @@ const PG_MIGRATIONS = [
   // Which halves of the team side a login may open: the update form, the WhatsApp portal, or both.
   "alter table users add column if not exists can_portal integer not null default 1",
   "alter table users add column if not exists can_form integer not null default 1",
+  // Which WhatsApp numbers this login may see in the portal; empty means the shared setting.
+  "alter table users add column if not exists wa_accounts text",
   "alter table conversations add column if not exists remind_after integer",
   "alter table conversations add column if not exists internal integer not null default 0",
   // Newsletters, receipts and service mail: kept, filed under Updates, never counted as waiting.

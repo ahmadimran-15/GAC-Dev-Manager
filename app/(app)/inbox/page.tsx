@@ -214,10 +214,14 @@ function Inbox({ side }: { side: "client" | "team" }) {
     .sort((a, b) => (b.last?.at ?? 0) - (a.last?.at ?? 0));
   const sideConvs = (state?.conversations ?? []).filter((c) => c.audience === side);
   const projects = [...new Set(sideConvs.map((c) => c.project).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b));
-  const mailboxes = (state?.accounts ?? []).filter((a) => a.kind === "email");
+  // Only the accounts this side of the inbox actually uses: the client number has no business in
+  // My team's folder list, and your own team number has none in Clients.
+  const sideAccounts = new Set(sideConvs.map((c) => String(c.account ?? "").toLowerCase()));
+  const onThisSide = (a: { id: string; address: string }) => sideAccounts.has(a.id.toLowerCase()) || sideAccounts.has(String(a.address ?? "").toLowerCase());
+  const mailboxes = (state?.accounts ?? []).filter((a) => a.kind === "email" && onThisSide(a));
   // Each WhatsApp number is its own folder too, the same as a mailbox: with two numbers connected,
   // "WhatsApp" alone does not say which one a chat came in on.
-  const numbers = (state?.accounts ?? []).filter((a) => a.kind === "whatsapp");
+  const numbers = (state?.accounts ?? []).filter((a) => a.kind === "whatsapp" && onThisSide(a));
   // Which chat is open is held here, not in the router. router.replace made Next fetch the page
   // again for every chat you clicked, which showed the loading screen and read as a refresh. The
   // address bar is still kept in step, so a link to a chat works and so does the browser's Back.

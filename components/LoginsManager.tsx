@@ -13,6 +13,7 @@ interface U {
   clickupName: string | null;
   canPortal: boolean;
   canForm: boolean;
+  waAccounts?: string[];
   lastLogin: number | null;
 }
 
@@ -46,7 +47,9 @@ function MemberSelect({ value, members, onChange, className = "" }: { value: str
 
 // Owner and team logins. Team members only get the update portal: no inbox, no contacts, no channels.
 export default function LoginsManager() {
-  const { toast } = useLive();
+  const { toast, state } = useLive();
+  // The WhatsApp numbers that can be handed out, for the per-person chips below.
+  const numbers = (state?.accounts ?? []).filter((a) => a.kind === "whatsapp");
   const [users, setUsers] = useState<U[]>([]);
   const [me, setMe] = useState<{ id: string } | null>(null);
   const [adding, setAdding] = useState(false);
@@ -140,6 +143,25 @@ export default function LoginsManager() {
                   title="The client chats, with names and numbers hidden"
                   onClick={() => call({ action: "update", id: u.id, canPortal: !u.canPortal }, u.canPortal ? `${u.name} can no longer open WhatsApp` : `${u.name} can open WhatsApp`)}
                 />
+                {/* Which numbers, for this person. Nothing ticked means whatever the shared setting
+                    on the Users page allows, so the common case needs no clicking. */}
+                {u.canPortal &&
+                  numbers.map((n) => {
+                    const on = (u.waAccounts ?? []).includes(n.id);
+                    const label = /^\d+$/.test(n.address) ? `+${n.address.slice(-4)}` : n.label.slice(0, 10);
+                    return (
+                      <Access
+                        key={n.id}
+                        on={on}
+                        label={label}
+                        title={`${n.label} · ${n.address} — tick to limit ${u.name} to the numbers you choose`}
+                        onClick={() => {
+                          const next = on ? (u.waAccounts ?? []).filter((x) => x !== n.id) : [...(u.waAccounts ?? []), n.id];
+                          call({ action: "update", id: u.id, waAccounts: next }, next.length ? `${u.name} sees ${next.length} number${next.length > 1 ? "s" : ""}` : `${u.name} follows the shared setting`);
+                        }}
+                      />
+                    );
+                  })}
               </div>
             )}
             {u.role === "team" && (
