@@ -1,6 +1,7 @@
 import { ImapFlow } from "imapflow";
 import nodemailer from "nodemailer";
 import { simpleParser } from "mailparser";
+import { classifyMail } from "@/lib/mailfilter";
 import { kvGet, kvSet } from "@/lib/db";
 import { accountsWithSecrets, getAccount, setAccountStatus, type AccountConfig, type AccountWithSecret } from "@/lib/accounts";
 import { addMessage, findOrCreateConversation, updateConversation } from "@/lib/store";
@@ -43,7 +44,6 @@ export async function testMailbox(a: MailCreds) {
   return out;
 }
 
-const NOISE = /(no-?reply|notifications?|mailer-daemon|newsletter|marketing|bounce|postmaster)@/i;
 
 function stripQuoted(text: string) {
   const lines = text.split(/\r?\n/);
@@ -74,10 +74,16 @@ export async function pollAccount(acc: AccountWithSecret, onNew: (convId: string
       const from = mail.from?.value?.[0];
       if (!from?.address) continue;
       const sender = from.address.toLowerCase();
-      // Skip our own outgoing copies, other company mailboxes and automated mail
-      if ((await accountsWithSecrets("email", false)).some((a) => a.address.toLowerCase() === sender) || NOISE.test(sender) || mail.headers.has("list-unsubscribe")) continue;
+      // Our own outgoing copies and the other company mailboxes are the only mail still skipped.
+      if ((await accountsWithSecrets("email", false)).some((a) => a.address.toLowerCase() === sender)) continue;
+      // Everything else is kept. A newsletter, receipt or service notice is filed under Updates
+      // rather than discarded, so a wrong call costs one click instead of a lost client email.
+      const verdict = await classifyMail(sender, mail.headers as unknown as Map<string, unknown>);
       const conv = await findOrCreateConversation({ channel: "email", externalId: sender, account: acc.address, name: from.name || from.address, subject: mail.subject ?? undefined });
       if (mail.subject) await updateConversation(conv.id, { subject: mail.subject });
+      // Moving a thread back to the clients by hand puts the sender on the allow list, which the
+      // classifier checks first, so a later newsletter from them cannot drag it back under Updates.
+      if (verdict.bulk !== !!conv.bulk) await updateConversation(conv.id, { bulk: verdict.bulk ? 1 : 0 });
       const body = stripQuoted(mail.text ?? "").slice(0, 4000);
       const id = await addMessage({
         conv_id: conv.id,

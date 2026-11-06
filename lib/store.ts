@@ -15,6 +15,7 @@ export interface Conversation {
   reminded_at: number | null;
   remind_after: number | null; // minutes before reminders start for this client (null = default)
   internal: number; // a chat with someone on our side (never "waiting")
+  bulk: number; // newsletter / receipt / service mail: filed under Updates, never "waiting"
   context: string | null; // AI summary of what's going on in this chat
   context_at: number | null;
   demo: number;
@@ -55,6 +56,7 @@ export interface ConvSummary {
   suggestion: string | null;
   remindAfter: number | null;
   internal: boolean;
+  bulk: boolean;
   audience: "client" | "team"; // which side of the inbox: the account it arrived on decides
   shiftWatch: boolean; // SOD / EOD screenshots are checked in this chat
   repliedBy: { name: string; at: number } | null; // last reply came from a teammate, not you
@@ -150,7 +152,7 @@ async function summaries(where = "", ...p: unknown[]): Promise<ConvSummary[]> {
   const byId = new Map(lasts.map((m) => [m.id, m]));
   return rows.map((c) => {
     const last = c.last_id ? byId.get(c.last_id) : undefined;
-    const waiting = c.status !== "handled" && !c.internal && Number(c.pend_n) > 0;
+    const waiting = c.status !== "handled" && !c.internal && !c.bulk && Number(c.pend_n) > 0;
     // "me" = sent here, "phone" = your phone; anything else is a teammate's name or a team portal author
     const byTeammate = c.lo_by && !["me", "phone"].includes(c.lo_by) ? c.lo_by : null;
     return {
@@ -170,6 +172,7 @@ async function summaries(where = "", ...p: unknown[]): Promise<ConvSummary[]> {
       suggestion: waiting ? c.suggestion : null,
       remindAfter: c.remind_after === null || c.remind_after === undefined ? null : Number(c.remind_after),
       internal: !!c.internal,
+      bulk: !!c.bulk,
       // Arrived on one of your team accounts, or it's a ClickUp task thread: the Team side of the inbox
       audience: c.channel === "clickup" || teamKeys.has(String(c.account ?? "").toLowerCase()) ? "team" : "client",
       // Shift screenshots (SOD / EOD) are watched for in this chat, so it gets the Check button

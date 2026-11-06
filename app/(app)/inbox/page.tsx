@@ -182,11 +182,14 @@ function Inbox({ side }: { side: "client" | "team" }) {
   const endRef = useRef<HTMLDivElement>(null);
 
   const isGroup = (c: ConvSummary) => c.channel === "whatsapp" && c.externalId.endsWith("@g.us");
+  const updatesCount = (state?.conversations ?? []).filter((c) => c.bulk && c.audience === side).length;
   // "Waiting" means a person is waiting on you. A ClickUp task thread is our own work, counted separately.
   const needsReply = (c: ConvSummary) => c.waiting && c.channel !== "clickup";
   // "whatsapp", "groups", "email", "team", or one mailbox / number (an account key)
   const inChannel = (c: ConvSummary) =>
-    channel === "all" ||
+    // Updates is the only folder that shows filed mail; everywhere else it stays out of the way.
+    (channel === "updates" ? c.bulk : !c.bulk) &&
+    (channel === "all" ||
     (channel === "groups"
       ? isGroup(c)
       : channel === "tasks"
@@ -195,7 +198,9 @@ function Inbox({ side }: { side: "client" | "team" }) {
           ? c.internal && c.channel !== "clickup"
           : channel === "whatsapp" || channel === "email"
             ? c.channel === channel
-            : c.account.toLowerCase() === channel.toLowerCase());
+            : channel === "updates"
+              ? true
+              : c.account.toLowerCase() === channel.toLowerCase()));
   const convs = (state?.conversations ?? [])
     .filter(
       (c) =>
@@ -389,6 +394,7 @@ function Inbox({ side }: { side: "client" | "team" }) {
                   { value: "email", label: "Email" },
                   { value: "tasks", label: `ClickUp tasks${state?.stats.tasks ? ` · ${state.stats.tasks}` : ""}`, hint: "task comments" },
                   ...mailboxes.map((m) => ({ value: m.address, label: m.address, hint: "mailbox" })),
+                  { value: "updates", label: `Updates${updatesCount ? ` · ${updatesCount}` : ""}`, hint: "newsletters, receipts, service mail" },
                   { value: "team", label: "Not clients", hint: "team, personal" },
                 ]}
               />
@@ -478,6 +484,15 @@ function Inbox({ side }: { side: "client" | "team" }) {
                   >
                     {c.internal ? "It's a client" : "Not a client"}
                   </button>
+                  {c.channel === "email" && (
+                    <button
+                      className="btn btn-sm"
+                      title={c.bulk ? "Put this sender back in the client inbox" : "File this sender under Updates: newsletters, receipts, service mail"}
+                      onClick={() => action({ action: "bulk", value: !c.bulk }, c.bulk ? "Moved back to the client inbox" : "Filed under Updates")}
+                    >
+                      {c.bulk ? "It's a real email" : "File under Updates"}
+                    </button>
+                  )}
                   {c.status === "handled" ? (
                     <button className="btn btn-sm" onClick={() => action({ action: "reopen" })}>
                       Reopen

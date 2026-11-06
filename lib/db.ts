@@ -42,6 +42,7 @@ create table if not exists conversations (
   reminded_at ${big},
   remind_after integer,
   internal integer not null default 0,
+  bulk integer not null default 0,
   context text,
   context_at ${big},
   demo integer not null default 0,
@@ -216,6 +217,7 @@ const SQLITE_MIGRATIONS: [table: string, column: string, type: string][] = [
   ["users", "clickup_name", "text"],
   ["conversations", "remind_after", "integer"],
   ["conversations", "internal", "integer not null default 0"],
+  ["conversations", "bulk", "integer not null default 0"],
   ["conversations", "context", "text"],
   ["conversations", "context_at", "integer"],
 ];
@@ -231,6 +233,8 @@ const PG_MIGRATIONS = [
   "alter table users add column if not exists can_form integer not null default 1",
   "alter table conversations add column if not exists remind_after integer",
   "alter table conversations add column if not exists internal integer not null default 0",
+  // Newsletters, receipts and service mail: kept, filed under Updates, never counted as waiting.
+  "alter table conversations add column if not exists bulk integer not null default 0",
   "alter table conversations add column if not exists context text",
   "alter table conversations add column if not exists context_at bigint",
 ];

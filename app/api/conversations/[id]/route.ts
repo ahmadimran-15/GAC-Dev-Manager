@@ -4,6 +4,7 @@ import { all } from "@/lib/db";
 import { numberNames, withNames } from "@/lib/whatsapp";
 import { previewTags, sendToConversation, warmTagging } from "@/lib/inbound";
 import { generateReply, suggestReply, summarizeConversation } from "@/lib/ai";
+import { mailLists, setMailLists } from "@/lib/mailfilter";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         // "Not a client": personal or team chats stay in the inbox but never wait or remind
         await updateConversation(id, { internal: body.value ? 1 : 0 });
         return NextResponse.json({ ok: true });
+      case "bulk": {
+        // Moving a thread between the client inbox and Updates. The decision is remembered against
+        // the sender, not just this thread, so the next newsletter from them lands the same way and
+        // the classifier stops second-guessing it.
+        const conv = await getConversation(id);
+        await updateConversation(id, { bulk: body.value ? 1 : 0 });
+        if (conv?.channel === "email" && conv.external_id) {
+          const address = conv.external_id.toLowerCase();
+          const lists = await mailLists();
+          await setMailLists({
+            always: body.value ? lists.always.filter((a) => a !== address) : [...lists.always, address],
+            never: body.value ? [...lists.never, address] : lists.never.filter((a) => a !== address),
+          });
+        }
+        return NextResponse.json({ ok: true });
+      }
       case "tags":
         return NextResponse.json(await previewTags(id, String(body.text ?? "")));
       case "generate":
