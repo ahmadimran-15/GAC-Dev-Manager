@@ -16,6 +16,7 @@ export function Ticks({ status }: { status: string | null }) {
 export const CHANNELS: Record<string, { label: string; color: string; Icon: typeof Mail }> = {
   whatsapp: { label: "WhatsApp", color: "#1fa855", Icon: MessageCircle },
   slack: { label: "Slack", color: "#8a3ffc", Icon: Hash },
+  discord: { label: "Discord", color: "#5865f2", Icon: Hash },
   teams: { label: "Teams", color: "#5b5fc7", Icon: Users },
   outlook: { label: "Outlook", color: "#0f6cbd", Icon: Mail },
   email: { label: "Email", color: "#d0590f", Icon: AtSign },

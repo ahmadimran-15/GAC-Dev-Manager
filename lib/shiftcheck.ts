@@ -107,9 +107,14 @@ const MARK = "🕒";
 function alreadySeen(texts: string[], date: string) {
   const seen = { sod: false, eod: false };
   for (const t of texts) {
-    if (!t.startsWith(MARK) || !t.includes(DAY(date))) continue;
-    if (/\bSOD\b/.test(t)) seen.sod = true;
-    if (/\bEOD\b/.test(t)) seen.eod = true;
+    if (!t.includes(DAY(date))) continue;
+    // Only the opening "🕒 SOD …" / "🕒 EOD …" counts — what was actually received. The rest of the
+    // line names the other half ("Now waiting on the EOD"), and reading that as proof made one SOD
+    // screenshot announce that the whole day was done.
+    const m = t.match(/^🕒\s*(SOD|EOD)\b/);
+    if (!m) continue;
+    if (m[1] === "SOD") seen.sod = true;
+    else seen.eod = true;
   }
   return seen;
 }

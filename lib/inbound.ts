@@ -295,6 +295,11 @@ async function sendOnceTo(convId: string, text: string, opts: { ack?: boolean; b
     const p = await postComment(c.external_id, text, true);
     r = { ok: true, id: p?.id ? `cu_${p.id}` : undefined };
     via = "ClickUp";
+  } else if (c.channel === "discord") {
+    // Goes out as the bot: Discord has no way for an app to post as a person.
+    const { sendDiscord } = await import("@/lib/discord");
+    r = await sendDiscord(c.account, c.external_id, text);
+    via = "Discord";
   } else if (c.channel === "slack") {
     // Sent with your own user token, so it arrives from you in Slack rather than from an app.
     const { sendSlack } = await import("@/lib/slack");
@@ -510,6 +515,15 @@ export function startWorker() {
     }
   };
   setTimeout(() => slack().catch(() => {}), 10_000);
+
+  // Discord holds an open connection rather than taking webhooks, so it is started here and checked
+  // every few minutes: an account added in Settings connects without a restart.
+  const discord = async () => {
+    const { syncDiscord } = await import("@/lib/discord");
+    await syncDiscord();
+  };
+  setTimeout(() => discord().catch((e) => log("discord-error", String(e))), 8_000);
+  setInterval(() => discord().catch((e) => log("discord-error", String(e))), 5 * 60_000);
   setInterval(() => slack().catch((e) => log("slack-error", String(e))), 60_000);
 
   // Scheduled group messages (Settings → Scheduled messages). Checked every minute; each one goes

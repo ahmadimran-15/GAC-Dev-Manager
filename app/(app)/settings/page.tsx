@@ -10,6 +10,7 @@ import GroupsManager from "@/components/GroupsManager";
 import ScheduledMessages from "@/components/ScheduledMessages";
 import MailFilter from "@/components/MailFilter";
 import SlackAccounts from "@/components/SlackAccounts";
+import DiscordBot from "@/components/DiscordBot";
 import TimeTrackingSettings from "@/components/TimeTrackingSettings";
 import CurrentProjects from "@/components/CurrentProjects";
 import { ago } from "@/components/ui";
@@ -203,6 +204,9 @@ export default function Settings() {
 
       <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Slack</h2>
       <SlackAccounts />
+
+      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Discord</h2>
+      <DiscordBot />
 
       <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">More channels</h2>
       <div className="card divide-y divide-[var(--line)] px-5">
