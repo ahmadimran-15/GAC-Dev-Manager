@@ -97,7 +97,9 @@ export default function UpdateForm() {
 
   useEffect(() => {
     fetch("/api/form", { cache: "no-store" })
-      .then((r) => (r.status === 401 ? ((location.href = "/login?next=/form"), null) : r.json()))
+      // 403 here means the login is paused or the form was taken away: there is nowhere left for
+      // them inside, so back to the sign-in page rather than a form that cannot load.
+      .then((r) => (r.status === 401 || r.status === 403 ? ((location.href = "/login?next=/form"), null) : r.json()))
       .then((d) => d && setData(d))
       .catch(() => setMsg({ ok: false, text: "Couldn't load the projects. Refresh the page." }));
   }, []);
