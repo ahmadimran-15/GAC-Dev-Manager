@@ -229,6 +229,7 @@ export interface Draft {
   author: string;
   text: string;
   status: string;
+  task_status: string | null; // the ClickUp status asked for with this update
   created_at: number;
 }
 
@@ -238,9 +239,9 @@ export function listDrafts() {
   );
 }
 
-export async function addDraft(d: { conv_id: string | null; project: string | null; author: string; author_id?: string | null; text: string }) {
+export async function addDraft(d: { conv_id: string | null; project: string | null; author: string; author_id?: string | null; text: string; taskStatus?: string | null }) {
   const id = uid("d_");
-  await run("insert into drafts (id, conv_id, project, author, author_id, text, created_at) values (?,?,?,?,?,?,?)", id, d.conv_id, d.project, d.author, d.author_id ?? null, d.text, Date.now());
+  await run("insert into drafts (id, conv_id, project, author, author_id, text, task_status, created_at) values (?,?,?,?,?,?,?,?)", id, d.conv_id, d.project, d.author, d.author_id ?? null, d.text, d.taskStatus || null, Date.now());
   return id;
 }
 

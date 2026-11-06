@@ -4,6 +4,7 @@ import { CheckCheck } from "lucide-react";
 import { api, useLive } from "@/components/Live";
 import { Avatar, Pill, Section, ago } from "@/components/ui";
 import DraftCard from "@/components/DraftCard";
+import DailyDigest from "@/components/DailyDigest";
 import MessageText from "@/components/MessageText";
 
 interface Handled {
@@ -45,6 +46,10 @@ export default function TeamUpdates() {
           )}
         </div>
       </Section>
+
+      <div className="lg:col-span-1">
+        <DailyDigest />
+      </div>
 
       <Section title="Already handled">
         <div className="card divide-y divide-[var(--line)] px-4">

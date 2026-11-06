@@ -9,6 +9,7 @@ interface Task {
   id: string;
   title: string;
   project: string;
+  status: string;
 }
 
 // A dropdown you can type in: with 37 projects and 200 tasks, scrolling a plain list is hopeless.
@@ -89,6 +90,8 @@ export default function UpdateForm() {
   const [project, setProject] = useState("");
   const [taskId, setTaskId] = useState("");
   const [text, setText] = useState("");
+  const [status, setStatus] = useState("");
+  const [statuses, setStatuses] = useState<{ status: string; color: string }[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -100,17 +103,20 @@ export default function UpdateForm() {
   }, []);
 
   const tasks = useMemo(() => (data?.tasks ?? []).filter((t) => t.project === project), [data, project]);
+  const current = useMemo(() => tasks.find((t) => t.id === taskId)?.status ?? "", [tasks, taskId]);
 
   async function submit() {
     setBusy(true);
     setMsg(null);
     try {
-      const res = await fetch("/api/form", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, taskId, text }) });
+      const res = await fetch("/api/form", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, taskId, text, status }) });
       const r = await res.json().catch(() => null);
       if (!res.ok) throw new Error(r?.error ?? "Couldn't send it");
       setMsg({ ok: true, text: "Sent for approval. Once the manager approves it, it goes on the task in ClickUp." });
       setText("");
       setTaskId("");
+      setStatus("");
+      setStatuses(null);
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : "Couldn't send it" });
     } finally {
@@ -145,8 +151,35 @@ export default function UpdateForm() {
           disabled={!project}
           empty={project ? `Search or pick a task (${tasks.length})` : "Pick the project first"}
           options={tasks.map((t) => ({ value: t.id, label: t.title }))}
-          onPick={setTaskId}
+          onPick={(v) => {
+            setTaskId(v);
+            setStatus("");
+            setStatuses(null);
+            // The statuses this task can move to come from its own ClickUp list, so they are
+            // fetched once the task is picked rather than for all 200 tasks up front.
+            fetch(`/api/form?task=${encodeURIComponent(v)}`, { cache: "no-store" })
+              .then((r) => r.json())
+              .then((d) => d?.options && setStatuses(d.options))
+              .catch(() => setStatuses([]));
+          }}
         />
+
+        {taskId && (
+          <div>
+            <label className="eyebrow mb-1.5 block">Status</label>
+            <select className="input" value={status} onChange={(e) => setStatus(e.target.value)} disabled={!statuses}>
+              <option value="">Leave it as it is{current ? ` (${current})` : ""}</option>
+              {(statuses ?? []).map((s) => (
+                <option key={s.status} value={s.status}>
+                  Ask to move to: {s.status}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[12px] text-[var(--muted)]">
+              {statuses ? "The manager sees this with your update and decides." : "Loading the statuses…"}
+            </p>
+          </div>
+        )}
 
         <div>
           <label className="eyebrow mb-1.5 block">Update</label>

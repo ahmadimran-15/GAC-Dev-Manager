@@ -23,7 +23,7 @@ export default function DraftCard({ d, now, inThread = false }: { d: DraftRow; n
   async function act(action: "approve" | "discard") {
     setBusy(true);
     try {
-      const body = action === "discard" ? { action } : mode === "reply" ? { action, text, from } : { action, text, target };
+      const body = action === "discard" ? { action } : mode === "reply" ? { action, text, from, taskStatus } : { action, text, target };
       const r = await api<{ simulated?: boolean; name?: string; via?: string | null }>(`/api/drafts/${d.id}`, body);
       toast(action === "discard" ? "Update discarded" : `Sent${r.name ? ` to ${r.name}` : ""}${r.via ? ` from ${r.via}` : ""}${r.simulated ? " (test mode)" : ""}`);
       refresh();
@@ -49,6 +49,22 @@ export default function DraftCard({ d, now, inThread = false }: { d: DraftRow; n
   }
 
   const ready = mode === "reply" ? !!d.conv_id : !!target;
+
+  // The status this approval will put the task into. It starts as whatever the teammate asked for,
+  // and the owner can change it before approving — or clear it and leave the task alone.
+  const [taskStatus, setTaskStatus] = useState(d.task_status ?? "");
+  const [statuses, setStatuses] = useState<{ status: string; color: string }[] | null>(null);
+  const [statusNow, setStatusNow] = useState("");
+  const loadStatuses = async () => {
+    if (statuses || !onTask || !conv?.externalId) return;
+    try {
+      const r = await api<{ current: string; options: { status: string; color: string }[] }>(`/api/tasks/${conv.externalId}/status`);
+      setStatuses(r.options);
+      setStatusNow(r.current);
+    } catch {
+      setStatuses([]);
+    }
+  };
   // Trailing punctuation is left out of the link: "see https://x.com/a." is a link and a full stop.
   const links = useMemo(() => [...new Set((text.match(/https?:\/\/[^\s<>"']+/g) ?? []).map((u) => u.replace(/[).,;:!?\]]+$/, "")))], [text]);
 
@@ -108,7 +124,33 @@ export default function DraftCard({ d, now, inThread = false }: { d: DraftRow; n
             </button>
           </div>
         )}
-        {mode === "reply" && onTask && <p className="text-[12.5px] text-[var(--muted)]">Goes on the ClickUp task “{conv?.name}” as a comment.</p>}
+        {mode === "reply" && onTask && (
+          <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-[var(--muted)]">
+            <span>Goes on the ClickUp task “{conv?.name}” as a comment.</span>
+            <span className="flex items-center gap-1.5">
+              Status:
+              <select
+                className="input !h-7 !w-auto !py-0 text-[12.5px]"
+                value={taskStatus}
+                onChange={(e) => setTaskStatus(e.target.value)}
+                onFocus={loadStatuses}
+                title="Where the task goes when you approve this"
+              >
+                <option value="">Leave as it is{statusNow ? ` (${statusNow})` : ""}</option>
+                {(statuses ?? (taskStatus ? [{ status: taskStatus, color: "" }] : [])).map((s) => (
+                  <option key={s.status} value={s.status}>
+                    Move to: {s.status}
+                  </option>
+                ))}
+              </select>
+            </span>
+            {d.task_status && (
+              <span className={taskStatus === d.task_status ? "text-[var(--ink-2)]" : "text-[var(--amber)]"}>
+                {d.author} asked for “{d.task_status}”{taskStatus !== d.task_status && " — you are overriding it"}
+              </span>
+            )}
+          </div>
+        )}
         {mode === "reply" && conv && !onTask && <FromPicker channel={conv.channel} account={conv.account} value={from} onChange={setFrom} />}
         {mode === "pick" && <RecipientPicker value={target} onChange={setTarget} />}
       </div>

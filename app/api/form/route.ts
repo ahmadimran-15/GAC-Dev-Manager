@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { get } from "@/lib/db";
-import { board } from "@/lib/clickup";
+import { board, taskStatuses } from "@/lib/clickup";
 import { currentUser } from "@/lib/auth";
 import { mayOpen } from "@/lib/session";
 import { addDraft } from "@/lib/store";
@@ -18,9 +18,21 @@ const isDone = (s: string) => /complete|done|closed/.test(s);
 const MAX_TEXT = 4000;
 const PER_HOUR = 20; // updates an hour from the whole form, so a public page can't flood the inbox
 
-export async function GET() {
+export async function GET(req: Request) {
   const me = await currentUser();
   if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+
+  // ?task=<id> → the statuses that task can move to, so the team can ask for one with their update.
+  const wantTask = new URL(req.url).searchParams.get("task");
+  if (wantTask) {
+    try {
+      const s = await taskStatuses(wantTask);
+      return NextResponse.json({ current: s.current, options: s.options.map((o) => ({ status: o.status, color: o.color })) });
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : "ClickUp failed" }, { status: 500 });
+    }
+  }
+
   const b = await board();
   const open = b.tasks.filter((t) => !isDone(t.status));
   // Anyone with the link sees this, and a task title can carry a client's email or number
@@ -30,7 +42,7 @@ export async function GET() {
     // What else this login may open, so the bar can show the WhatsApp button only to those who have it
     can: { form: mayOpen(me, "form"), portal: mayOpen(me, "portal") },
     projects: [...new Set(open.map((t) => scrub(t.project)))].sort((a, b2) => a.localeCompare(b2)),
-    tasks: open.map((t) => ({ id: t.id, title: scrub(t.title), project: scrub(t.project) })).sort((a, b2) => a.title.localeCompare(b2.title)),
+    tasks: open.map((t) => ({ id: t.id, title: scrub(t.title), project: scrub(t.project), status: t.status })).sort((a, b2) => a.title.localeCompare(b2.title)),
   });
 }
 
@@ -60,6 +72,10 @@ export async function POST(req: Request) {
       author: me.name,
       author_id: me.id,
       text: `Update of Task\n${me.name} · ${task.title}\n\n${text.slice(0, MAX_TEXT)}`,
+      // The status they are asking for. It is a request, not a change: the owner can approve it,
+      // pick a different one (an update that reads badly goes to revision, not to approved), or
+      // leave the task where it is.
+      taskStatus: String(b.status ?? "").trim().toLowerCase() || null,
     });
     return NextResponse.json({ ok: true, task: task.title, project: task.project });
   } catch (e) {

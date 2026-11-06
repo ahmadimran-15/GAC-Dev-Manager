@@ -74,6 +74,7 @@ create table if not exists drafts (
   author_id text,
   text text not null,
   status text not null default 'pending',
+  task_status text,
   sent_to text,
   created_at ${big} not null
 );
@@ -211,6 +212,7 @@ const SQLITE_MIGRATIONS: [table: string, column: string, type: string][] = [
   ["messages", "via", "text"],
   ["drafts", "author_id", "text"],
   ["drafts", "sent_to", "text"],
+  ["drafts", "task_status", "text"],
   ["users", "clickup_name", "text"],
   ["conversations", "remind_after", "integer"],
   ["conversations", "internal", "integer not null default 0"],
@@ -221,6 +223,8 @@ const SQLITE_MIGRATIONS: [table: string, column: string, type: string][] = [
 const PG_MIGRATIONS = [
   "alter table drafts add column if not exists author_id text",
   "alter table drafts add column if not exists sent_to text",
+  // The ClickUp status a teammate asked for with their update; the owner can change it on approval.
+  "alter table drafts add column if not exists task_status text",
   "alter table users add column if not exists clickup_name text",
   // Which halves of the team side a login may open: the update form, the WhatsApp portal, or both.
   "alter table users add column if not exists can_portal integer not null default 1",

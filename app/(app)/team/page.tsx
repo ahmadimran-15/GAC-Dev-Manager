@@ -12,7 +12,9 @@ import { EstimateBox, StatusSelect, TimerButton, clock, hm, useTick, type Estima
 const FILTERS = ["Open", "In progress", "Other", "Blocked", "Done", "All"] as const;
 // Open = not started yet (to do / pending); Other = every remaining status (client pending, UAT testing, waiting for approval…)
 const isOpen = (s: string) => /^(to ?do|pending|open)$/.test(s.trim());
-const inWork = (s: string) => /progress|revision/.test(s);
+// In progress means in progress and nothing else. Revision used to be counted here, which made the
+// column read as work underway when it was really work handed back — it sits under Other now.
+const inWork = (s: string) => /\bprogress\b/.test(s);
 const bucket = (s: string) => (isDone(s) ? "Done" : /block/.test(s) ? "Blocked" : inWork(s) ? "In progress" : isOpen(s) ? "Open" : "Other");
 
 type T = Board["tasks"][number];

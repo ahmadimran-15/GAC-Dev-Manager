@@ -9,6 +9,7 @@ export interface DraftRow {
   author: string;
   text: string;
   created_at: number;
+  task_status?: string | null;
   conv_name: string | null;
   channel: string | null;
 }
