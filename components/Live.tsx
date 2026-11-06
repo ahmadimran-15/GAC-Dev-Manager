@@ -16,7 +16,7 @@ export interface DraftRow {
 
 export interface AccountLite {
   id: string;
-  kind: "email" | "whatsapp";
+  kind: "email" | "whatsapp" | "slack" | "discord";
   label: string;
   address: string;
   provider: string;

@@ -48,7 +48,21 @@ export async function POST(req: Request) {
         const acc = (await getAccount(id))!;
         const st = await sessionStatus(acc);
         await setAccountStatus(id, st.status === "ready", st.status === "ready" ? undefined : `Session ${st.status}`);
-        return NextResponse.json({ ok: true, id });
+        // Register the webhook straight away: a number added without one is connected but silent,
+        // and the only sign is that nothing ever arrives from it. Other webhooks on the session
+        // (n8n's) are left alone by registerWebhook, which only touches our own.
+        let hook: string | null = null;
+        let hookError: string | null = null;
+        const base = String(process.env.PUBLIC_URL || b.publicUrl || "").replace(/\/$/, "");
+        if (base.startsWith("https://")) {
+          try {
+            await registerWebhook(acc, `${base}/api/webhooks/whatsapp`);
+            hook = `${base}/api/webhooks/whatsapp`;
+          } catch (e) {
+            hookError = e instanceof Error ? e.message : "could not register the webhook";
+          }
+        } else hookError = "no public https address is set (PUBLIC_URL), so nothing will arrive from this number yet";
+        return NextResponse.json({ ok: true, id, hook, hookError });
       }
       case "update":
         await updateAccount(b.id, { label: b.label, enabled: b.enabled, canSend: b.canSend });

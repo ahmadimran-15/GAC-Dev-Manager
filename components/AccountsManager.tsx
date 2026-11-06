@@ -250,8 +250,17 @@ function AddWhatsApp({ defaultUrl, onDone }: { defaultUrl: string; onDone: () =>
     if (!s) return;
     setBusy(true);
     try {
-      await api("/api/accounts", { action: "add-whatsapp", baseUrl, apiKey, sessionId: s.id, phone: s.phone, label: label || s.name || s.pushName || s.phone });
-      toast("WhatsApp number added");
+      const r = await api<{ hook: string | null; hookError: string | null }>("/api/accounts", {
+        action: "add-whatsapp",
+        baseUrl,
+        apiKey,
+        sessionId: s.id,
+        phone: s.phone,
+        label: label || s.name || s.pushName || s.phone,
+      });
+      // The webhook is registered as part of adding the number, so say whether that worked: a number
+      // with no webhook looks connected and never delivers a message.
+      toast(r.hook ? "WhatsApp number added and its webhook registered" : `Number added, but ${r.hookError ?? "the webhook was not registered"}`, r.hook ? "ok" : "error");
       onDone();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", "error");

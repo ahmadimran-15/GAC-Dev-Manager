@@ -215,6 +215,9 @@ function Inbox({ side }: { side: "client" | "team" }) {
   const sideConvs = (state?.conversations ?? []).filter((c) => c.audience === side);
   const projects = [...new Set(sideConvs.map((c) => c.project).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b));
   const mailboxes = (state?.accounts ?? []).filter((a) => a.kind === "email");
+  // Each WhatsApp number is its own folder too, the same as a mailbox: with two numbers connected,
+  // "WhatsApp" alone does not say which one a chat came in on.
+  const numbers = (state?.accounts ?? []).filter((a) => a.kind === "whatsapp");
   const id = params.get("c") ?? convs[0]?.id ?? null;
   // Phone: one pane at a time, the list until a chat is tapped, then the chat with a back arrow
   const chosen = !!params.get("c");
@@ -394,6 +397,7 @@ function Inbox({ side }: { side: "client" | "team" }) {
                   { value: "email", label: "Email" },
                   { value: "tasks", label: `ClickUp tasks${state?.stats.tasks ? ` · ${state.stats.tasks}` : ""}`, hint: "task comments" },
                   ...mailboxes.map((m) => ({ value: m.address, label: m.address, hint: "mailbox" })),
+                  ...numbers.map((n) => ({ value: n.id, label: n.label && n.label !== n.address ? `${n.label} · +${n.address}` : `+${n.address}`, hint: "WhatsApp number" })),
                   { value: "updates", label: `Updates${updatesCount ? ` · ${updatesCount}` : ""}`, hint: "newsletters, receipts, service mail" },
                   { value: "team", label: "Not clients", hint: "team, personal" },
                 ]}
