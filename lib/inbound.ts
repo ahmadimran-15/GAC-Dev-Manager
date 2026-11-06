@@ -33,6 +33,22 @@ const timers = new Map<string, NodeJS.Timeout>();
 // Clients often send several messages in a row, so wait a few seconds before drafting a reply.
 // Office hours only: overnight the message is still stored and still shows as waiting, it just does
 // not spend a Gemini call on a draft nobody will read until morning. "Suggest a reply" still works.
+
+// A photo sent in HD arrives as two message.received events, a few hundred milliseconds apart, with
+// two different message ids — WhatsApp itself shows one bubble. The gateway stamps both with the
+// same uuid in its idempotency key, so that is what identifies the pair. The first is kept and
+// pointed at the second's id, which is the full-size copy, rather than storing the picture twice.
+const sameSend = new Map<string, { messageId: string; at: number }>();
+function seenBefore(inc: Incoming) {
+  if (!inc.event || inc.kind === "text") return null;
+  const now = Date.now();
+  for (const [k, v] of sameSend) if (now - v.at > 120_000) sameSend.delete(k);
+  return sameSend.get(inc.event) ?? null;
+}
+const rememberSend = (inc: Incoming, messageId: string) => {
+  if (inc.event && inc.kind !== "text") sameSend.set(inc.event, { messageId, at: Date.now() });
+};
+
 export function afterIncoming(convId: string) {
   if (!aiConfigured()) return;
   if (!aiHoursNow()) return;
@@ -117,6 +133,11 @@ export async function storeWhatsApp(inc: Incoming, live: boolean) {
       const recent = (await getMessages(conv.id)).slice(-3);
       if (recent.some((m) => m.direction === "out" && m.text === inc.text && Math.abs(Number(m.created_at) - inc.at) < 120_000)) return { duplicate: true };
     }
+    const twin = seenBefore(inc);
+    if (twin) {
+      await updateMessage(twin.messageId, { external_id: inc.id, media_path: null, media_mime: null });
+      return { duplicate: true };
+    }
     const id = await addMessage({
       conv_id: conv.id,
       direction: ours ? "out" : "in",
@@ -128,6 +149,7 @@ export async function storeWhatsApp(inc: Incoming, live: boolean) {
       created_at: inc.at,
       via: acc?.label,
     });
+    if (id) rememberSend(inc, id);
     if (id && ours && live) await updateConversation(conv.id, { suggestion: null, suggestion_for: null, reminded_at: null });
     if (id && live) {
       // A watched chat exists for the shift screenshots, so whoever posts one gets it checked —
@@ -153,8 +175,15 @@ export async function storeWhatsApp(inc: Incoming, live: boolean) {
   // A direct chat with a teammate is internal: shown in the inbox, never counted as a waiting client
   const conv = await findOrCreateConversation({ channel: "whatsapp", externalId: inc.phone, account, name: teammate ?? inc.name });
   if (teammate && !conv.internal) await updateConversation(conv.id, { internal: 1 });
+  const twin = seenBefore(inc);
+  if (twin) {
+    // Same send, better copy: keep the one message and point it at the larger file.
+    await updateMessage(twin.messageId, { external_id: inc.id, media_path: null, media_mime: null });
+    return { duplicate: true };
+  }
   const id = await addMessage({ conv_id: conv.id, direction: "in", kind: inc.kind, text: inc.kind === "voice" ? null : inc.text || null, external_id: inc.id, created_at: inc.at, via: acc?.label });
   if (!id) return { duplicate: true };
+  rememberSend(inc, id);
   if (!live) return { stored: id };
   // A teammate's direct chat is otherwise left alone, but a shift screenshot in a watched one still counts
   if (teammate) {

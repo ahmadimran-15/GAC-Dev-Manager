@@ -281,6 +281,10 @@ export interface Incoming {
   name: string;
   text: string;
   kind: "text" | "voice" | "image" | "video" | "file";
+  // The gateway stamps every delivery with msg_<session>_<messageId>_<uuid>. The uuid is the same
+  // for both halves of a photo sent in HD — two message ids, one actual send — so it is what tells
+  // the second copy apart from a genuinely new picture.
+  event?: string | null;
   at: number;
 }
 
@@ -302,8 +306,11 @@ export function parseIncoming(body: any): Incoming | null {
   // Video is its own kind now, so the thread can play it instead of calling it a file
   const kind = type === "voice" || type === "audio" || type === "ptt" ? "voice" : type === "image" || type === "sticker" ? "image" : type === "video" ? "video" : type === "document" ? "file" : "text";
   const ts = Number(m?.timestamp ?? body?.timestamp ?? 0);
+  const idem = String(body?.idempotencyKey ?? "");
+  const eventId = idem.match(/_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/)?.[1] ?? null;
   return {
     id: String(m?.id?._serialized ?? m?.id ?? m?.waMessageId ?? `${chatId}-${ts}`),
+    event: eventId,
     sessionId: body?.sessionId ?? d?.sessionId ?? m?.sessionId ?? null,
     isGroup,
     author: String(m?.pushName ?? m?.notifyName ?? m?.senderName ?? m?.contact?.pushName ?? m?.contact?.pushname ?? m?.author ?? ""),
