@@ -173,8 +173,10 @@ async function summaries(where = "", ...p: unknown[]): Promise<ConvSummary[]> {
       remindAfter: c.remind_after === null || c.remind_after === undefined ? null : Number(c.remind_after),
       internal: !!c.internal,
       bulk: !!c.bulk,
-      // Arrived on one of your team accounts, or it's a ClickUp task thread: the Team side of the inbox
-      audience: c.channel === "clickup" || teamKeys.has(String(c.account ?? "").toLowerCase()) ? "team" : "client",
+      // My team = ClickUp task threads and WhatsApp on one of your own numbers. Email is always a
+      // client channel, whichever mailbox it arrived on: a newsletter to your own address belongs in
+      // Updates, not in the team side, which is for the work your people are doing.
+      audience: c.channel === "clickup" || (c.channel !== "email" && teamKeys.has(String(c.account ?? "").toLowerCase())) ? "team" : "client",
       // Shift screenshots (SOD / EOD) are watched for in this chat, so it gets the Check button
       shiftWatch: c.channel === "whatsapp" && matchesWatch(watched, c),
       repliedBy: !waiting && byTeammate && c.lo_t ? { name: byTeammate, at: Number(c.lo_t) } : null,

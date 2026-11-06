@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getConversation, getMessages, summarize, updateConversation } from "@/lib/store";
-import { all } from "@/lib/db";
+import { all, run } from "@/lib/db";
 import { numberNames, withNames } from "@/lib/whatsapp";
 import { previewTags, sendToConversation, warmTagging } from "@/lib/inbound";
 import { generateReply, suggestReply, summarizeConversation } from "@/lib/ai";
@@ -70,6 +70,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         await updateConversation(id, { bulk: body.value ? 1 : 0 });
         if (conv?.channel === "email" && conv.external_id) {
           const address = conv.external_id.toLowerCase();
+          // The same sender writing to two of your mailboxes is two threads, and the decision is
+          // about the sender, so every thread from that address moves together.
+          await run("update conversations set bulk = ? where channel = 'email' and lower(external_id) = ?", body.value ? 1 : 0, address);
           const lists = await mailLists();
           await setMailLists({
             always: body.value ? lists.always.filter((a) => a !== address) : [...lists.always, address],
