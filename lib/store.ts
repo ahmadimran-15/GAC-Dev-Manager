@@ -26,7 +26,7 @@ export interface Message {
   id: string;
   conv_id: string;
   direction: "in" | "out";
-  kind: "text" | "voice" | "image" | "file";
+  kind: "text" | "voice" | "image" | "video" | "file";
   text: string | null;
   transcript: string | null;
   media_path: string | null;

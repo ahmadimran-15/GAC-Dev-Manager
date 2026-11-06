@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Check, CheckCheck, ChevronDown, ChevronUp, Clock, ExternalLink, ListPlus, Loader2, Mic, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, ChevronDown, ChevronUp, Clock, ExternalLink, ListPlus, Loader2, Mic, Paperclip, PenSquare, RotateCw, Search, Send, Sparkles, X } from "lucide-react";
 import Composer from "@/components/Composer";
 import MessageText, { plainText } from "@/components/MessageText";
 import type { ConvSummary, Message } from "@/lib/store";
@@ -218,9 +218,22 @@ function Inbox({ side }: { side: "client" | "team" }) {
   // Each WhatsApp number is its own folder too, the same as a mailbox: with two numbers connected,
   // "WhatsApp" alone does not say which one a chat came in on.
   const numbers = (state?.accounts ?? []).filter((a) => a.kind === "whatsapp");
-  const id = params.get("c") ?? convs[0]?.id ?? null;
+  // Which chat is open is held here, not in the router. router.replace made Next fetch the page
+  // again for every chat you clicked, which showed the loading screen and read as a refresh. The
+  // address bar is still kept in step, so a link to a chat works and so does the browser's Back.
+  const [picked, setPicked] = useState<string | null>(null);
+  const urlC = params.get('c');
+  const id = picked ?? urlC ?? convs[0]?.id ?? null;
+  const openChat = (next: string | null) => {
+    setPicked(next);
+    try {
+      window.history.replaceState(null, '', sideUrl(next ?? undefined));
+    } catch {
+      router.replace(sideUrl(next ?? undefined));
+    }
+  };
   // Phone: one pane at a time, the list until a chat is tapped, then the chat with a back arrow
-  const chosen = !!params.get("c");
+  const chosen = !!(picked ?? urlC);
   const now = state?.now ?? Date.now();
 
   // Opening a chat marks it as seen up to its latest message
@@ -234,10 +247,18 @@ function Inbox({ side }: { side: "client" | "team" }) {
     } catch {}
   }, [id, openedLast]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which chat is open right now, read at the moment a reply lands rather than when it was asked
+  // for. Switching chats used to flash the previous one: its request was still in the air, and
+  // whichever answer arrived last won — usually the old one, since it had a head start.
+  const openId = useRef(id);
+  openId.current = id;
+
   const load = useCallback(async () => {
     if (!id) return;
+    const forId = id;
     try {
-      setDetail(await api<Detail>(`/api/conversations/${id}`));
+      const d = await api<Detail>(`/api/conversations/${forId}`);
+      if (openId.current === forId) setDetail(d);
     } catch {
       /* ignore */
     }
@@ -246,6 +267,12 @@ function Inbox({ side }: { side: "client" | "team" }) {
   useEffect(() => {
     api<BoardLite>("/api/team").then(setBoard).catch(() => {});
   }, []);
+
+  // A link from elsewhere (a reminder, the overview) changes ?c= — let that win over the last
+  // chat clicked here.
+  useEffect(() => {
+    setPicked(null);
+  }, [urlC]);
 
   useEffect(() => {
     setDetail(null);
@@ -411,7 +438,7 @@ function Inbox({ side }: { side: "client" | "team" }) {
               return (
               <button
                 key={x.id}
-                onClick={() => router.replace(sideUrl(x.id))}
+                onClick={() => openChat(x.id)}
                 className={`relative flex w-full gap-3 rounded-xl px-3 py-2.5 text-left transition ${
                   open ? "bg-white shadow-[0_0_0_1px_var(--line-2),0_2px_8px_-4px_rgba(0,0,0,0.12)]" : "hover:bg-[var(--bg)]/70"
                 }`}
@@ -457,7 +484,7 @@ function Inbox({ side }: { side: "client" | "team" }) {
             <div className="space-y-2.5 border-b border-[var(--line)] px-4 py-3 md:px-6 md:py-3.5">
               {/* Who + actions */}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <button className="btn btn-ghost !h-9 !w-9 shrink-0 !p-0 md:hidden" title="All chats" onClick={() => router.replace(sideUrl())}>
+                <button className="btn btn-ghost !h-9 !w-9 shrink-0 !p-0 md:hidden" title="All chats" onClick={() => openChat(null)}>
                   <ArrowLeft size={18} />
                 </button>
                 <Avatar name={c.name} size={38} />
@@ -635,6 +662,26 @@ function Inbox({ side }: { side: "client" | "team" }) {
                             </div>
                           )}
                           {m.kind === "voice" && m.media_path && <audio controls src={`/api/media/${m.media_path}`} className="mb-2 h-9 w-64 max-w-full" />}
+                          {/* The file itself is fetched the first time it is looked at, so a day of
+                              photos costs nothing until someone opens one. */}
+                          {m.kind === "image" && (
+                            <a href={`/api/messages/${m.id}/media`} target="_blank" rel="noreferrer" className="mb-2 block">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={`/api/messages/${m.id}/media`}
+                                alt="Picture"
+                                loading="lazy"
+                                className="max-h-[320px] w-auto max-w-full cursor-zoom-in rounded-xl"
+                                onError={(e) => ((e.currentTarget.style.display = "none"), void 0)}
+                              />
+                            </a>
+                          )}
+                          {m.kind === "video" && <video controls preload="metadata" src={`/api/messages/${m.id}/media`} className="mb-2 max-h-[320px] w-auto max-w-full rounded-xl" />}
+                          {m.kind === "file" && (
+                            <a href={`/api/messages/${m.id}/media`} target="_blank" rel="noreferrer" className="mb-1.5 inline-flex items-center gap-1.5 text-[12.5px] underline underline-offset-2">
+                              <Paperclip size={13} /> Open the file
+                            </a>
+                          )}
                           {body ? <MessageText text={body} dark={mine && !m.ack} /> : m.kind === "voice" ? <Transcribe id={m.id} dark={mine && !m.ack} onDone={load} /> : null}
                         </div>
                         <div className="mt-1 px-1 text-[11px] text-[var(--muted)]">

@@ -280,7 +280,7 @@ export interface Incoming {
   chatId: string;
   name: string;
   text: string;
-  kind: "text" | "voice" | "image" | "file";
+  kind: "text" | "voice" | "image" | "video" | "file";
   at: number;
 }
 
@@ -299,7 +299,8 @@ export function parseIncoming(body: any): Incoming | null {
   // Groups are keyed by their group id; people by phone number
   const phone = isGroup ? chatId : String((isLid ? (m?.senderPhone ?? m?.contact?.number) : null) ?? chatId.split("@")[0]).replace(/[^\d]/g, "") || chatId;
   const type = String(m?.type ?? "text");
-  const kind = type === "voice" || type === "audio" || type === "ptt" ? "voice" : type === "image" || type === "sticker" ? "image" : ["video", "document"].includes(type) ? "file" : "text";
+  // Video is its own kind now, so the thread can play it instead of calling it a file
+  const kind = type === "voice" || type === "audio" || type === "ptt" ? "voice" : type === "image" || type === "sticker" ? "image" : type === "video" ? "video" : type === "document" ? "file" : "text";
   const ts = Number(m?.timestamp ?? body?.timestamp ?? 0);
   return {
     id: String(m?.id?._serialized ?? m?.id ?? m?.waMessageId ?? `${chatId}-${ts}`),
@@ -475,7 +476,16 @@ async function fetchMedia(a: AccountWithSecret, chatId: string, messageId: strin
     if (res.ok) {
       const buf = unwrap(Buffer.from(await res.arrayBuffer()));
       const mime = (res.headers.get("content-type") ?? "audio/ogg").split(";")[0];
-      const ext = mime.includes("mpeg") ? "mp3" : mime.includes("mp4") || mime.includes("m4a") ? "m4a" : mime.includes("wav") ? "wav" : "ogg";
+      // The saved name carries the right extension for pictures and video too, not just audio: the
+      // file used to be written as .ogg whatever it was.
+      const ext =
+        mime.startsWith("image/") ? (mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : mime.includes("gif") ? "gif" : "jpg")
+        : mime.startsWith("video/") ? (mime.includes("quicktime") ? "mov" : mime.includes("webm") ? "webm" : "mp4")
+        : mime.includes("pdf") ? "pdf"
+        : mime.includes("mpeg") ? "mp3"
+        : mime.includes("mp4") || mime.includes("m4a") ? "m4a"
+        : mime.includes("wav") ? "wav"
+        : "ogg";
       const file = `${messageId.replace(/[^\w-]/g, "").slice(-60)}.${ext}`;
       fs.writeFileSync(path.join(MEDIA_DIR, file), buf);
       return { file, mime: mime === "application/octet-stream" ? "audio/ogg" : mime, buf };
