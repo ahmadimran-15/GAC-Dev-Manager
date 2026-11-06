@@ -9,6 +9,7 @@ import HealthPanel from "@/components/HealthPanel";
 import GroupsManager from "@/components/GroupsManager";
 import ScheduledMessages from "@/components/ScheduledMessages";
 import MailFilter from "@/components/MailFilter";
+import EmailAlerts from "@/components/EmailAlerts";
 import SlackAccounts from "@/components/SlackAccounts";
 import DiscordBot from "@/components/DiscordBot";
 import TimeTrackingSettings from "@/components/TimeTrackingSettings";
@@ -159,6 +160,7 @@ export default function Settings() {
             ))}
           </select>
         </div>
+        <EmailAlerts />
         <Row
           name="Desktop notifications"
           ok={notif === "granted"}

@@ -1,4 +1,4 @@
-import { all, logEvent } from "@/lib/db";
+import { all, kvGet, logEvent } from "@/lib/db";
 import { aiConfigured, suggestReply } from "@/lib/ai";
 import { aiHoursLabel, aiHoursNow } from "@/lib/aihours";
 import {
@@ -378,6 +378,11 @@ async function alertNewEmail(convId: string) {
   const to = process.env.REMINDER_WHATSAPP_TO;
   const c = await getConversation(convId);
   if (!to || !c || c.demo || !(await waConfigured())) return;
+  // Newsletters and receipts are kept now instead of being thrown away, and every one of them was
+  // pinging the phone. Filed mail never alerts, and the alerts can be switched off outright in
+  // Settings without touching .env.
+  if (c.bulk) return;
+  if ((await kvGet('email_alerts')) === 'off') return;
   const last = (await getMessages(convId)).filter((m) => m.direction === "in").pop();
   const url = process.env.PUBLIC_URL ? `\nOpen: ${process.env.PUBLIC_URL}/inbox?c=${convId}` : "";
   await sendWhatsApp(to, `📧 New email to ${c.account} from *${c.name}*\n${c.subject ? `Subject: ${c.subject}\n` : ""}${(last?.text ?? "").slice(0, 300)}${url}`);
