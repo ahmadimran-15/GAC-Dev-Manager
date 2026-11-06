@@ -1,5 +1,6 @@
 import { all, logEvent } from "@/lib/db";
-import { aiConfigured, suggestReply, summarizeConversation, transcribe, transcriptionConfigured } from "@/lib/ai";
+import { aiConfigured, suggestReply } from "@/lib/ai";
+import { aiHoursLabel, aiHoursNow } from "@/lib/aihours";
 import {
   accountForSession,
   bareId,
@@ -30,8 +31,11 @@ const log = (source: string, payload: unknown) => logEvent(source, payload).catc
 const timers = new Map<string, NodeJS.Timeout>();
 
 // Clients often send several messages in a row, so wait a few seconds before drafting a reply.
+// Office hours only: overnight the message is still stored and still shows as waiting, it just does
+// not spend a Gemini call on a draft nobody will read until morning. "Suggest a reply" still works.
 export function afterIncoming(convId: string) {
   if (!aiConfigured()) return;
+  if (!aiHoursNow()) return;
   clearTimeout(timers.get(convId));
   timers.set(
     convId,
@@ -44,19 +48,11 @@ export function afterIncoming(convId: string) {
 
 // ---------- WhatsApp ----------
 
-// A teammate (Abdullah, Yusuf, the company number) answered in a client chat: refresh the AI context
-// so you can see what was said without reading the whole thread.
-const contextTimers = new Map<string, NodeJS.Timeout>();
-export function afterTeammateReply(convId: string) {
-  if (!aiConfigured()) return;
-  clearTimeout(contextTimers.get(convId));
-  contextTimers.set(
-    convId,
-    setTimeout(() => {
-      contextTimers.delete(convId);
-      summarizeConversation(convId, true).catch((e) => log("context-error", { convId, error: String(e) }));
-    }, 6000),
-  );
+// A teammate answered in a client chat. The thread summary used to be rebuilt here, every time,
+// all day — in a busy group that is dozens of Gemini calls for a summary nobody opened. It is
+// written on demand now: the Context button in the inbox calls it when you actually want it.
+export function afterTeammateReply(_convId: string) {
+  /* nothing automatic: see the Context button in the inbox */
 }
 
 // Delivery ticks for a message we sent (matched by its WhatsApp id in any form)
@@ -484,6 +480,7 @@ export function startWorker() {
   setInterval(() => taskChats().catch((e) => log("task-chat-error", String(e))), 3 * 60_000);
 
   const estimates = async () => {
+    if (!aiHoursNow()) return; // office hours only: AI estimates are not worth waking up for
     const r = await (await import("@/lib/estimates")).estimateMissing();
     if (r.estimated) log("estimates", r);
   };
@@ -491,8 +488,12 @@ export function startWorker() {
   setInterval(() => estimates().catch((e) => log("estimate-error", String(e))), 10 * 60_000);
   setInterval(() => watchSessions().catch((e) => log("backfill-error", String(e))), 120_000);
 
-  // After a restart, draft replies for anyone still waiting without one
+  log("ai-hours", { background: aiHoursLabel(), now: aiHoursNow() ? "on" : "off" });
+
+  // After a restart, draft replies for anyone still waiting without one (office hours only, and a
+  // restart at 3 am used to redraft the whole backlog in one go)
   setTimeout(async () => {
+    if (!aiHoursNow()) return;
     try {
       for (const c of await listConversations()) if (c.waiting && !c.demo && !c.suggestion) afterIncoming(c.id);
     } catch (e) {

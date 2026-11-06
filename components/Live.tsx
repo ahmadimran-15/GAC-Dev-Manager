@@ -39,6 +39,7 @@ export interface LiveState {
   accounts: AccountLite[];
   connections: {
     gemini: boolean;
+    aiHours?: { from: number; to: number; tz: string; now: boolean; hour: number; label: string };
     transcription: boolean;
     whisper: boolean;
     stt: string;

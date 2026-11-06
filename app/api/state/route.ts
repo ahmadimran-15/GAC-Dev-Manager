@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { get } from "@/lib/db";
 import { firstReplyToday, listConversations, listDrafts } from "@/lib/store";
+import { aiHoursInfo } from "@/lib/aihours";
 import { aiConfigured, transcriptionConfigured } from "@/lib/ai";
 import { sttLabel, whisperConfigured } from "@/lib/stt";
 import { numberNames, sessionStatus, waAccounts, withNames } from "@/lib/whatsapp";
@@ -61,6 +62,7 @@ export async function GET() {
       },
       connections: {
         gemini: aiConfigured(),
+        aiHours: aiHoursInfo(),
         transcription: transcriptionConfigured(),
         whisper: whisperConfigured(),
         stt: sttLabel(),

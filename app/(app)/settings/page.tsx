@@ -208,6 +208,15 @@ export default function Settings() {
       <div className="card divide-y divide-[var(--line)] px-5">
         <Row name="Gemini (your custom server)" ok={k ? k.gemini : null} detail="Writes suggested replies, polishes messages, drafts tasks and understands voice commands." />
         <Row
+          name="Background AI hours"
+          ok={k?.aiHours ? k.aiHours.now : null}
+          detail={
+            k?.aiHours
+              ? `${k.aiHours.now ? "On now" : "Off now"} · the server drafts replies on its own only between ${k.aiHours.label}. Outside those hours nothing is drafted until you press Suggest, and thread context is only ever written when you press Context. The SOD / EOD screenshot check runs day and night.`
+              : "Loading…"
+          }
+        />
+        <Row
           name="Speech to text"
           ok={k ? k.transcription : null}
           detail={

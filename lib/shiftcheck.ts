@@ -58,11 +58,26 @@ export async function watchesShiftCheck(c: Pick<Conversation, "name" | "external
   return matchesWatch(await shiftCheckChats(), c);
 }
 
+// The model sometimes answers in prose instead of JSON — "I'm having trouble reading that image" —
+// which used to throw and lose the reply for that screenshot entirely. One retry covers it; a second
+// prose answer is reported as what it is rather than as a JSON syntax error.
 export async function classifyShift(image: Buffer, mime: string): Promise<Shift> {
-  const raw = await readImage(image, mime, PROMPT);
-  const json = raw.replace(/```json|```/g, "").trim();
-  const start = json.indexOf("{");
-  const parsed = JSON.parse(start >= 0 ? json.slice(start, json.lastIndexOf("}") + 1) : json) as Partial<Shift>;
+  let raw = "";
+  let parsed: Partial<Shift> | null = null;
+  for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 2500));
+    raw = await readImage(image, mime, PROMPT);
+    const json = raw.replace(/```json|```/g, "").trim();
+    const start = json.indexOf("{");
+    const end = json.lastIndexOf("}");
+    if (start < 0 || end < start) continue; // no object in there at all: prose, try once more
+    try {
+      parsed = JSON.parse(json.slice(start, end + 1)) as Partial<Shift>;
+    } catch {
+      /* half an object: try once more */
+    }
+  }
+  if (!parsed) throw new Error(`The Gemini server did not read the picture. It answered: ${raw.replace(/\s+/g, " ").slice(0, 120)}`);
   return {
     shift: parsed.shift === "sod" || parsed.shift === "eod" ? parsed.shift : "unknown",
     date: typeof parsed.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : null,
@@ -82,26 +97,30 @@ const localDay = (at: number) => {
 // What has already been confirmed for a date, so the reply can say what is still outstanding. Read back
 // out of our own earlier replies in the chat, which keeps the whole feature free of a new table.
 const MARK = "🕒";
+
+// What has already been confirmed for a date, read back out of our own earlier replies. A half counts
+// as received once either proof for it has arrived — the timer screenshot or the report email — so the
+// next line looks forward to the other half of the day instead of nagging for the matching screenshot.
 function alreadySeen(texts: string[], date: string) {
-  const seen = { timer: false, email: false, half: new Set<string>() };
+  const seen = { sod: false, eod: false };
   for (const t of texts) {
-    if (!t.startsWith(MARK) || !t.includes(date)) continue;
-    if (/\btimer\b/i.test(t)) seen.timer = true;
-    if (/\bemail\b/i.test(t)) seen.email = true;
-    const m = t.match(/\b(SOD|EOD)\b/);
-    if (m) seen.half.add(m[1]);
+    if (!t.startsWith(MARK) || !t.includes(DAY(date))) continue;
+    if (/\bSOD\b/.test(t)) seen.sod = true;
+    if (/\bEOD\b/.test(t)) seen.eod = true;
   }
   return seen;
 }
 
 export function shiftMessage(s: Shift, date: string, seen: ReturnType<typeof alreadySeen>) {
   const half = s.shift.toUpperCase();
-  const what = s.proof === "timer" ? `timer (${s.clock === "out" ? "clocked out" : "clocked in"}${s.elapsed ? ` ${s.elapsed}` : ""})` : s.proof === "email" ? "report email" : "screenshot";
+  const what =
+    s.proof === "timer" ? `timer (${s.clock === "out" ? "clocked out" : "clocked in"}${s.elapsed ? ` ${s.elapsed}` : ""})` : s.proof === "email" ? "report email" : "screenshot";
+  const sod = seen.sod || s.shift === "sod";
+  const eod = seen.eod || s.shift === "eod";
   const lines = [`${MARK} ${half} ${what} received for ${DAY(date)}.`];
-  const timer = seen.timer || s.proof === "timer";
-  const email = seen.email || s.proof === "email";
-  if (timer && email) lines.push(`${half} is complete for ${DAY(date)}.`);
-  else lines.push(`Still waiting on the ${timer ? "report email" : "timer screenshot"} for ${half}.`);
+  if (sod && eod) lines.push(`SOD and EOD are both done for ${DAY(date)}. Nothing else needed today.`);
+  else if (sod) lines.push("Now waiting on the EOD.");
+  else lines.push("Now waiting on the SOD.");
   return lines.join(" ");
 }
 
@@ -183,11 +202,10 @@ function summarise(days: DayCheck[], hours: number) {
   if (!days.length) return `No SOD or EOD screenshots in the last ${hours} hours.`;
   return days
     .map((d) => {
+      // Either proof counts as that half received, the same rule the chat replies use.
       const part = (half: DayCheck["sod"], label: string) => {
         const have = [half.timer && "timer", half.email && "report email"].filter(Boolean);
-        if (!have.length) return `${label} missing`;
-        if (have.length === 2) return `${label} complete`;
-        return `${label} has the ${have[0]} only`;
+        return have.length ? `${label} ✓ (${have.join(" + ")})` : `${label} missing`;
       };
       return `${DAY(d.date)}: ${part(d.sod, "SOD")}, ${part(d.eod, "EOD")}.`;
     })
