@@ -3,7 +3,7 @@ import { get } from "@/lib/db";
 import { board, taskStatuses } from "@/lib/clickup";
 import { addDraft } from "@/lib/store";
 import { taskConversation } from "@/lib/taskchat";
-import { checkUpdateToken } from "@/lib/updatetokens";
+import { checkUpdateToken, updateTokens } from "@/lib/updatetokens";
 import { listUsers } from "@/lib/users";
 
 export const dynamic = "force-dynamic";
@@ -23,10 +23,21 @@ const MAX_TEXT = 4000;
 const PER_HOUR = 20;
 
 const isDone = (s: string) => /complete|done|closed/.test(s);
+async function openOrToken(req: Request) {
+  const presented = req.headers.get("authorization") ?? req.headers.get("x-gac-token");
+  const hit = await checkUpdateToken(presented);
+  if (hit) return hit;
+  // No tokens made at all: the endpoint is deliberately open.
+  return (await updateTokens()).length === 0 ? { name: "no token" } : null;
+}
+
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
 export async function POST(req: Request) {
-  const app = await checkUpdateToken(req.headers.get("authorization") ?? req.headers.get("x-gac-token"));
+  // Open unless a token exists. With none made, any app on the network can file an update, which
+  // is what the owner wants: every update names a real team member and waits for approval anyway.
+  // Make a token in Users → Updates from another app and this starts demanding one.
+  const app = await openOrToken(req);
   if (!app) return NextResponse.json({ error: "Unknown or missing token" }, { status: 401 });
 
   const b = await req.json().catch(() => ({}) as Record<string, unknown>);
@@ -89,7 +100,7 @@ export async function POST(req: Request) {
 
 // So the other app can check the token and show the right task list.
 export async function GET(req: Request) {
-  const app = await checkUpdateToken(req.headers.get("authorization") ?? req.headers.get("x-gac-token"));
+  const app = await openOrToken(req);
   if (!app) return NextResponse.json({ error: "Unknown or missing token" }, { status: 401 });
   const b0 = await board();
   const open = b0.tasks.filter((t) => !isDone(t.status));
