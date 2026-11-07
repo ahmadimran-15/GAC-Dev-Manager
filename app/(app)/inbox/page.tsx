@@ -799,6 +799,13 @@ function Inbox({ side }: { side: "client" | "team" }) {
                   <button className="btn btn-ghost btn-sm" disabled={busy || !reply.trim()} onClick={polish}>
                     <Sparkles size={13} /> Polish
                   </button>
+                  {/* Overnight nothing is drafted on its own, so there has to be a way to ask for one.
+                      Only offered when there is no draft already and you have not started typing. */}
+                  {c.waiting && !c.suggestion && !reply.trim() && (
+                    <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => action({ action: "suggest" })} title="Draft a reply to the last message">
+                      <Sparkles size={13} /> Suggest a reply
+                    </button>
+                  )}
                   {/* Whatever is in the reply box goes with the file as its caption. */}
                   {c.channel === "whatsapp" && (
                     <>
