@@ -665,7 +665,10 @@ function Inbox({ side }: { side: "client" | "team" }) {
               </div>
             )}
 
-            <div className="scroll min-h-0 flex-1 px-3 py-4 md:px-6 md:py-5">
+            {/* flex-col + mt-auto: a short conversation sits just above the reply box instead of
+                leaving a band of dead space between the two, which is how a chat should read. */}
+            <div className="scroll flex min-h-0 flex-1 flex-col px-3 py-4 md:px-6 md:py-5">
+              <div className="mt-auto" />
               {detail.messages.map((m, i) => {
                 // A teammate (team number) writing in the group from their own phone: counts as our reply,
                 // but it's their message, so it sits on the left with their name, like in WhatsApp
@@ -760,9 +763,9 @@ function Inbox({ side }: { side: "client" | "team" }) {
               <div ref={endRef} />
             </div>
 
-            <div className="border-t border-[var(--line)] px-3 py-3 md:px-6 md:py-4">
+            <div className="border-t border-[var(--line)] px-3 py-2.5 md:px-6 md:py-3">
               {c.waiting && c.suggestion && !reply && (
-                <div className="mb-3 flex items-start gap-3 rounded-xl bg-[var(--bg)] px-3 py-2.5 md:px-4 md:py-3">
+                <div className="mb-2 flex items-start gap-3 rounded-xl bg-[var(--bg)] px-3 py-2 md:px-4 md:py-2.5">
                   <Sparkles size={14} className="mt-1 shrink-0 text-[var(--muted)]" />
                   <p className="flex-1 text-[13.5px] leading-relaxed text-[var(--ink-2)] max-md:line-clamp-2">{c.suggestion}</p>
                   <div className="flex shrink-0 gap-1">
