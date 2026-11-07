@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getConversation, getMessages, summarize, updateConversation } from "@/lib/store";
 import { all, run } from "@/lib/db";
-import { numberNames, withNames } from "@/lib/whatsapp";
+import { learnMentionNames, numberNames, withNames } from "@/lib/whatsapp";
 import { previewTags, sendToConversation, warmTagging } from "@/lib/inbound";
 import { generateReply, suggestReply, summarizeConversation } from "@/lib/ai";
 import { mailLists, setMailLists } from "@/lib/mailfilter";
@@ -23,6 +23,18 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     ),
   ]);
   const names = await numberNames();
+  // A mention can carry WhatsApp's own id rather than a phone number. Opening the chat resolves any
+  // it has not seen before and remembers them, so the next time it is instant.
+  if (c.channel === "whatsapp") {
+    const { accountsWithSecrets } = await import("@/lib/accounts");
+    const accs = await accountsWithSecrets("whatsapp", false).catch(() => []);
+    const acc = accs.find((a) => a.id === c.account) ?? accs[0] ?? null;
+    await learnMentionNames(
+      messages.flatMap((m) => [m.text ?? "", m.transcript ?? ""]),
+      names,
+      acc,
+    ).catch(() => names);
+  }
   return NextResponse.json({
     conversation: { ...summary, subject: c.subject },
     // "@923…" mentions and "+923…" senders shown as names

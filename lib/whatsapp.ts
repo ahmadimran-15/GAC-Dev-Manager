@@ -203,6 +203,8 @@ export async function numberNames(): Promise<Map<string, string>> {
     for (const t of list ?? []) if (t.number && t.name && !/^\+?\d+$/.test(t.name)) names.set(t.number, t.name);
   }
   for (const t of await teamNumbers()) names.set(t.number, t.name);
+  // Mentions carrying a LID rather than a phone number, learned when a chat was opened.
+  for (const [lid, n] of Object.entries(await knownLidNames())) names.set(lid, n);
   // Your own WhatsApp numbers are tagged by teammates too: show your name
   const owner = (await get<{ name: string }>("select name from users where role = 'admin' order by created_at limit 1").catch(() => null))?.name;
   for (const a of await waAccounts()) if (owner && a.address && /^\d+$/.test(a.address)) names.set(a.address, owner);
@@ -216,7 +218,9 @@ export function withNames(text: string, names: Map<string, string>, hideUnknown 
   const name = (num: string) => names.get(num) ?? (hideUnknown ? "someone" : null);
   return text
     .replace(/^\+(\d{8,15}): /, (m, num: string) => (name(num) ? `${name(num)}: ` : m))
-    .replace(/(^|[^\w@])@(\d{8,15})(?!\d)/g, (m, pre: string, num: string) => (name(num) ? `${pre}@${name(num)}` : m));
+    // Up to 20 digits: a mention can carry WhatsApp's own id for someone (a "LID") rather than their
+    // phone number, and those are longer. @56694222667797 is a person, not a phone number.
+    .replace(/(^|[^\w@])@(\d{8,20})(?!\d)/g, (m, pre: string, num: string) => (name(num) ? `${pre}@${name(num)}` : m));
 }
 
 // Who "@Name" can mean in a chat: saved contacts and team numbers. In a group, `close` = the ones who are
@@ -662,4 +666,51 @@ export async function webhookHealth(a: AccountWithSecret, want: string) {
   const list = await wa<{ id: string; url: string }[]>(a, "/webhooks");
   const mine = list.find((w) => w.url.includes("/api/webhooks/whatsapp"));
   return { ok: !!mine && mine.url === want, found: mine?.url ?? null, others: list.filter((w) => !w.url.includes("/api/webhooks/whatsapp")).length };
+}
+
+// Mentions that carry a LID instead of a phone number.
+//
+// WhatsApp increasingly tags people by its own id — "@56694222667797" — which is not a phone number
+// and so matches nothing in the contact list. The gateway can turn one into a phone number, and from
+// there the usual contact name applies. The answer is kept in the database, because the same handful
+// of people are tagged over and over and the lookup is a request to the gateway each time.
+const LID_NAMES = "lid_names";
+
+export async function knownLidNames(): Promise<Record<string, string>> {
+  try {
+    return JSON.parse((await kvGet(LID_NAMES)) ?? "{}") as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+// Fills in any @id in these texts that the names map cannot explain yet, and remembers what it finds.
+export async function learnMentionNames(texts: string[], names: Map<string, string>, a: AccountWithSecret | null, max = 12) {
+  const unknown = new Set<string>();
+  for (const t of texts) for (const m of String(t ?? "").matchAll(/@(\d{8,20})/g)) if (!names.has(m[1])) unknown.add(m[1]);
+  if (!unknown.size) return names;
+
+  const saved = await knownLidNames();
+  let learned = false;
+  for (const lid of [...unknown].slice(0, max)) {
+    if (saved[lid]) {
+      names.set(lid, saved[lid]);
+      continue;
+    }
+    if (!a) continue;
+    const phone = await senderPhone(a, `${lid}@lid`).catch(() => "");
+    if (!phone) continue;
+    const name = names.get(phone);
+    if (name) {
+      // Only a real name is remembered. A number shown because nobody has saved that contact yet
+      // would otherwise stick around after they are added to the address book.
+      saved[lid] = name;
+      names.set(lid, name);
+      learned = true;
+    } else {
+      names.set(lid, `+${phone}`);
+    }
+  }
+  if (learned) await kvSet(LID_NAMES, JSON.stringify(saved)).catch(() => {});
+  return names;
 }
