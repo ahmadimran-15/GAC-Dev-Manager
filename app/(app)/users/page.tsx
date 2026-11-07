@@ -1,6 +1,7 @@
 import LoginsManager from "@/components/LoginsManager";
 import TeamNumbersManager from "@/components/TeamNumbersManager";
 import TeamWhatsAppAccess from "@/components/TeamWhatsAppAccess";
+import UpdateTokens from "@/components/UpdateTokens";
 
 export const metadata = { title: "Users · GAC Desk" };
 
@@ -17,6 +18,9 @@ export default function UsersPage() {
 
       <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">What the team&apos;s WhatsApp portal shows</h2>
       <TeamWhatsAppAccess />
+
+      <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Updates from another app</h2>
+      <UpdateTokens />
 
       <h2 className="mb-1 mt-10 text-[13.5px] font-semibold">Team numbers</h2>
       <p className="mb-2 text-[13px] text-[var(--ink-2)]">
