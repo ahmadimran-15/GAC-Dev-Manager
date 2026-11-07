@@ -202,6 +202,8 @@ export async function numberNames(): Promise<Map<string, string>> {
     if (!list || !targetCache.get(`${a.id}:contacts`)?.at) listTargets(a, "contacts").catch(() => {});
     for (const t of list ?? []) if (t.number && t.name && !/^\+?\d+$/.test(t.name)) names.set(t.number, t.name);
   }
+  // Profile names first, so a saved contact or a team number set below overrides them.
+  for (const [num, n] of Object.entries(await pushNames())) if (!names.has(num)) names.set(num, n);
   for (const t of await teamNumbers()) names.set(t.number, t.name);
   // Mentions carrying a LID rather than a phone number, learned when a chat was opened.
   for (const [lid, n] of Object.entries(await knownLidNames())) names.set(lid, n);
@@ -713,4 +715,33 @@ export async function learnMentionNames(texts: string[], names: Map<string, stri
   }
   if (learned) await kvSet(LID_NAMES, JSON.stringify(saved)).catch(() => {});
   return names;
+}
+
+// The name people set on their own WhatsApp — the one your phone shows above a message from someone
+// you have never saved. It arrives with every message, so it is worth keeping: it is the difference
+// between "@+919717444623" and "@Ankit Bansal" for anyone outside your address book.
+//
+// A saved contact always wins over this, because that is the name you chose for them.
+const PUSH_NAMES = "push_names";
+
+// Not every profile name is worth having. ".", "..", "…" and a string of emoji tell you nothing, so
+// a name has to carry at least two letters to be used at all.
+const usefulName = (n: string) => (n.match(/\p{L}/gu) ?? []).length >= 2 && !/^\+?\d[\d\s()-]*$/.test(n.trim());
+
+export async function pushNames(): Promise<Record<string, string>> {
+  try {
+    return JSON.parse((await kvGet(PUSH_NAMES)) ?? "{}") as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+export async function rememberPushName(phone: string, name: string) {
+  const num = String(phone ?? "").replace(/[^\d]/g, "");
+  const clean = String(name ?? "").trim().slice(0, 60);
+  if (!num || !clean || !usefulName(clean)) return;
+  const all = await pushNames();
+  if (all[num] === clean) return;
+  all[num] = clean;
+  await kvSet(PUSH_NAMES, JSON.stringify(all)).catch(() => {});
 }

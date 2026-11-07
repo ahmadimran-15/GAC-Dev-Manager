@@ -11,6 +11,7 @@ import {
   parseIncoming,
   resolveMentions,
   senderPhone,
+  rememberPushName,
   sendWhatsApp,
   taggablePeople,
   waAccounts,
@@ -120,6 +121,9 @@ export async function storeWhatsApp(inc: Incoming, live: boolean) {
   const fromPhone = inc.fromMe ? "" : await senderPhone(acc, inc.senderId);
   const teammate = inc.fromMe ? null : await teamMember(fromPhone);
   const ours = inc.fromMe || !!teammate;
+  // Keep the name people set on their own WhatsApp. It rides along with every message, and for
+  // anyone outside the address book it is the only name there is.
+  if (fromPhone && inc.author && !/@(c\.us|lid)$/.test(inc.author)) void rememberPushName(fromPhone, inc.author).catch(() => {});
   // Group members without a WhatsApp name show as their number, never as a raw id
   if (!inc.author || /@(c\.us|lid)$/.test(inc.author)) inc.author = fromPhone ? `+${fromPhone}` : "";
 
