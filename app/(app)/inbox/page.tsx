@@ -223,6 +223,8 @@ function Inbox({ side }: { side: "client" | "team" }) {
   const [board, setBoard] = useState<BoardLite | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const filePick = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<File | null>(null);
+  const [preview, setPreview] = useState("");
 
   const isGroup = (c: ConvSummary) => c.channel === "whatsapp" && c.externalId.endsWith("@g.us");
   const updatesCount = (state?.conversations ?? []).filter((c) => c.bulk && c.audience === side).length;
@@ -321,9 +323,34 @@ function Inbox({ side }: { side: "client" | "team" }) {
     setOpenChatId(null);
   }, [urlC]);
 
+  // Ctrl+V anywhere while a chat is open attaches the picture on the clipboard — the way most
+  // screenshots travel. It never swallows a normal text paste.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith("image/"));
+      if (!item) return;
+      const f = item.getAsFile();
+      if (f) {
+        e.preventDefault();
+        stage(f);
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }); // no deps: it has to see the chat that is open right now
+
+  // A preview of whatever is waiting to go, cleaned up when it changes or goes.
+  useEffect(() => {
+    if (!pending || !pending.type.startsWith("image/")) return setPreview("");
+    const url = URL.createObjectURL(pending);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pending]);
+
   useEffect(() => {
     setDetail(null);
     setReply("");
+    setPending(null); // an attachment belongs to the chat it was staged in
     setSelecting(false);
     setSel(new Set());
     load();
@@ -340,8 +367,41 @@ function Inbox({ side }: { side: "client" | "team" }) {
 
   const c = detail?.conversation;
 
+  // A file waiting to go: picked, pasted or dropped. It is sent when you press Send, with
+  // whatever is in the reply box as its caption — so a picture and its message go together.
+  const stage = (f: File | null | undefined) => {
+    if (!f || !c) return;
+    if (c.channel !== "whatsapp") return toast("Files can only be sent on WhatsApp for now", "error");
+    if (f.size > 25 * 1024 * 1024) return toast(`That file is ${(f.size / 1048576).toFixed(1)} MB; the limit is 25 MB`, "error");
+    setPending(f);
+  };
+
+  async function sendFile() {
+    if (!c || !pending) return;
+    setBusy(true);
+    try {
+      const body = new FormData();
+      body.append("file", pending);
+      if (reply.trim()) body.append("caption", reply.trim());
+      if (from) body.append("from", from);
+      const res = await fetch(`/api/conversations/${c.id}/media`, { method: "POST", body });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(d?.error ?? "Could not send the file");
+      setPending(null);
+      setReply("");
+      toast(`Sent the ${d.kind === "image" ? "picture" : d.kind === "video" ? "video" : "file"}`);
+      await load();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not send the file", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function doSend(text: string, ack = false) {
-    if (!c || !text.trim()) return;
+    if (!c) return;
+    if (pending && !ack) return sendFile();
+    if (!text.trim()) return;
     setBusy(true);
     if (await send(c.id, text.trim(), ack, from || null)) {
       if (!ack) setReply("");
@@ -667,7 +727,14 @@ function Inbox({ side }: { side: "client" | "team" }) {
 
             {/* flex-col + mt-auto: a short conversation sits just above the reply box instead of
                 leaving a band of dead space between the two, which is how a chat should read. */}
-            <div className="scroll flex min-h-0 flex-1 flex-col px-3 py-4 md:px-6 md:py-5">
+            <div
+              className="scroll flex min-h-0 flex-1 flex-col px-3 py-4 md:px-6 md:py-5"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                stage(e.dataTransfer.files?.[0]);
+              }}
+            >
               <div className="mt-auto" />
               {detail.messages.map((m, i) => {
                 // A teammate (team number) writing in the group from their own phone: counts as our reply,
@@ -781,6 +848,27 @@ function Inbox({ side }: { side: "client" | "team" }) {
               <div className="mb-2 flex items-center justify-between">
                 <FromPicker channel={c.channel} account={c.account} value={from} onChange={setFrom} />
               </div>
+              {/* What is attached and about to go. Removing it leaves the typed message alone. */}
+              {pending && (
+                <div className="mb-2 flex items-center gap-2.5 rounded-xl border border-[var(--line)] bg-[var(--bg)] px-2.5 py-2">
+                  {preview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={preview} alt="" className="h-11 w-11 shrink-0 rounded-lg object-cover" />
+                  ) : (
+                    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-white text-[var(--ink-2)]">
+                      <Paperclip size={15} />
+                    </span>
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-[13px]">
+                    {pending.name || "pasted image"}
+                    <span className="text-[var(--muted)]"> · {(pending.size / 1024).toFixed(0)} KB</span>
+                    <span className="block text-[12px] text-[var(--muted)]">Press Send to post it{reply.trim() ? " with your message as the caption" : ""}</span>
+                  </span>
+                  <button className="btn btn-ghost btn-sm shrink-0 !px-2" title="Remove" onClick={() => setPending(null)}>
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
               <ReplyBox
                 convId={c.id}
                 value={reply}
@@ -814,27 +902,9 @@ function Inbox({ side }: { side: "client" | "team" }) {
                         type="file"
                         className="hidden"
                         accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.zip"
-                        onChange={async (e) => {
-                          const f = e.target.files?.[0];
+                        onChange={(e) => {
+                          stage(e.target.files?.[0]);
                           e.target.value = "";
-                          if (!f) return;
-                          setBusy(true);
-                          try {
-                            const body = new FormData();
-                            body.append("file", f);
-                            if (reply.trim()) body.append("caption", reply.trim());
-                            if (from) body.append("from", from);
-                            const res = await fetch(`/api/conversations/${c.id}/media`, { method: "POST", body });
-                            const d = await res.json().catch(() => null);
-                            if (!res.ok) throw new Error(d?.error ?? "Could not send the file");
-                            setReply("");
-                            toast(`Sent the ${d.kind === "image" ? "picture" : d.kind === "video" ? "video" : "file"}`);
-                            load();
-                          } catch (err) {
-                            toast(err instanceof Error ? err.message : "Could not send the file", "error");
-                          } finally {
-                            setBusy(false);
-                          }
                         }}
                       />
                       <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => filePick.current?.click()} title="Send a picture, video or file">
@@ -842,7 +912,7 @@ function Inbox({ side }: { side: "client" | "team" }) {
                       </button>
                     </>
                   )}
-                  <button className="btn btn-dark btn-sm ml-auto" disabled={busy || !reply.trim()} onClick={() => doSend(reply)}>
+                  <button className="btn btn-dark btn-sm ml-auto" disabled={busy || (!reply.trim() && !pending)} onClick={() => doSend(reply)}>
                     <Send size={13} /> Send
                   </button>
                 </div>
