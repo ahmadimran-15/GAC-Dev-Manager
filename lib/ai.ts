@@ -358,12 +358,18 @@ export async function transcribe(audio: Buffer, mime: string): Promise<string | 
       const t = await geminiAudio(audio, mime);
       if (t) return t;
     } catch (e) {
-      if (!whisperConfigured() && !process.env.GOOGLE_AI_API_KEY) throw e;
+      // Gemini's own error is the useful one, so it is reported rather than swallowed. Falling back to
+      // the local model here was worse than useless on the hosted server: loading a quarter-gigabyte
+      // of Whisper on a 512 MB instance turns "reconnect the Gemini session" into a long hang, and it
+      // garbles Urdu even when it does load. A Google AI key is still worth trying — it is a web call.
+      if (!process.env.GOOGLE_AI_API_KEY) throw e;
     }
   }
   // Local Whisper needs ffmpeg to decode the audio. If it isn't installed (or the engine fails for any
   // other reason) fall through to Google's API instead of giving up.
-  if (whisperConfigured()) {
+  // Only when Gemini is not set up at all: on a machine with no Gemini server this is still the
+  // offline option, but it is never used to paper over a Gemini failure.
+  if (whisperConfigured() && !geminiAudioConfigured()) {
     try {
       const t = await whisper(audio, mime);
       if (t.text && garbled(t.text)) throw new Error("The local speech model could not make sense of this voice note (it is weak on Urdu and Hindi). Connect the Gemini server's Google session, or set a Google AI key, to read it properly.");
